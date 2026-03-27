@@ -1,0 +1,13 @@
+
+> hpe-document-creator-backend@1.0.0 start
+> node src/server.js
+
+[dotenv@17.2.2] injecting env (8) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+✅ Database connected successfully
+⚠️ Skipping sync in production, use migrations instead
+🚀 Server listening on port 5000
+127.0.0.1 - - [04/Sep/2025:14:09:31 +0000] "GET /api/user-dashboard?page=1&limit=1&search=OPE-HOLD1234567 HTTP/1.1" 304 - "http://10.203.96.173/dashboard/user/create-document" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+127.0.0.1 - - [04/Sep/2025:14:09:31 +0000] "GET /api/sections?page=1&limit=4 HTTP/1.1" 304 - "http://10.203.96.173/dashboard/user/create-document" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+127.0.0.1 - - [04/Sep/2025:14:09:31 +0000] "GET /api/sections?limit=1000 HTTP/1.1" 304 - "http://10.203.96.173/dashboard/user/create-document" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+127.0.0.1 - - [04/Sep/2025:14:09:31 +0000] "GET /api/user-module-permissions/user/2 HTTP/1.1" 304 - "http://10.203.96.173/dashboard/user/create-document" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+127.0.0.1 - - [04/Sep/2025:14:09:31 +0000] "GET /api/drafts/OPE-HOLD1234567 HTTP/1.1" 304 - "http://10.203.96.173/dashboard/user/create-document" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"

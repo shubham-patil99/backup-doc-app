@@ -1,0 +1,47 @@
+{
+  "name": "hpe-document-creator-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "migrate": "sequelize-cli db:migrate --config src/config/config.js --migrations-path src/migrations --models-path src/models",
+    "migrate:undo": "sequelize-cli db:migrate:undo --config src/config/config.js --migrations-path src/migrations --models-path src/models"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@azure/identity": "^4.12.0",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
+    "cheerio": "^1.1.2",
+    "cors": "^2.8.5",
+    "docx": "^7.0.0",
+    "docxtemplater": "^3.66.3",
+    "docxtemplater-image-module-free": "^1.1.1",
+    "dotenv": "^17.2.1",
+    "express": "^4.21.2",
+    "fast-xml-parser": "^5.3.2",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^7.0.6",
+    "officegen": "^0.6.5",
+    "pdf-lib": "^1.17.1",
+    "pg": "^8.16.3",
+    "pg-hstore": "^2.3.4",
+    "pizzip": "^3.2.0",
+    "pptxgenjs": "^4.0.1",
+    "quill-better-table": "^1.2.10",
+    "sequelize": "^6.37.7"
+  },
+  "devDependencies": {
+    "@types/multer": "^2.0.0",
+    "nodemon": "^3.1.10",
+    "sequelize-cli": "^6.6.3"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "brahma_document_creator",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "dev:frontend": "cd frontend && npx next dev",
+    "dev:electron": "wait-on http://localhost:3000 && electron .",
+    "build:frontend": "cd frontend && next build && next export",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:electron\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.0.3",
+    "wait-on": "^9.0.4"
+  }
+}
