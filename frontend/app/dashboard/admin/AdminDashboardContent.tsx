@@ -10,16 +10,18 @@ import logo from "../../../assets/hpe-logo.png";
 import SectionsTab from "./sections/SectionsTab";
 import ModulesTab from "./modules/ModulesTab";
 import UsersTab from "./users/UsersTab";
-// import PermissionsTab from "./permissions/PermissionsTab";
+import PermissionsTab from "./permissions/PermissionsTab";
 
 // 👇 New Engagement Tab
 import CustomerTab from "./engagement/CustomerTab";
+import OpeTab from "./allOpes/OpeTab";
 
 const tabItems = [
   { label: "Modules", component: SectionsTab },
   { label: "Sections", component: ModulesTab },
   { label: "Users", component: UsersTab },
   { label: "Customer Db", component: CustomerTab }, // ✅ added
+  { label: "All OPEs", component: OpeTab }, 
   // { label: "Permissions", component: PermissionsTab },
 ];
 
@@ -68,7 +70,7 @@ export default function AdminDashboardContent() {
          <div className="flex items-center gap-2">
             <Image src={logo.src} alt="HPE Logo" width="80px" height="80px" />
             <Text size="small" color="#fff" className="text-center sm:text-left text-sm font-bold sm:text-base">
-              Brahma - SOW Creator
+              Brahma
             </Text>
           </div>
 

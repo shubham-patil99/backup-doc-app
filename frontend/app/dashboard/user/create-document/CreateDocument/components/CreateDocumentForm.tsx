@@ -291,12 +291,6 @@ export default function CreateDocumentForm({ userId, onClose }: FormProps) {
               </Text>
             )}
 
-            <Text>Quote ID</Text>
-            <TextInput
-              value={quoteId}
-              onChange={(e) => setQuoteId(e.target.value)}
-              placeholder="Enter Quote ID (optional)"
-            />
 
             {/* Partner checkbox */}
             <Box direction="row" align="center" gap="small" margin={{ top: "small" }}>

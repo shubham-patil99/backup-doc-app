@@ -29,6 +29,7 @@ import { CSS } from "@dnd-kit/utilities";
 interface Section {
   id: number;
   title: string;
+  docType: "full" | "small" | "proposal";
   createdAt?: string;
   updatedAt?: string;
 }
@@ -43,7 +44,7 @@ function SortableItem({
   onChangeEdit,
   onSaveEdit,
   onCancelEdit,
-   onCompactToggle,
+   onDocTypeChange,
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({
@@ -118,12 +119,16 @@ function SortableItem({
               title="Short SoW"
               onClick={(e) => e.stopPropagation()}
             >
-              <input
-                type="checkbox"
-                checked={section.compact}
-                onChange={() => onCompactToggle(section.id, !section.compact)}
-                className="w-4 h-4 accent-green-600 cursor-pointer"
-              />
+             <select
+              value={section.docType}
+              onChange={(e) => onDocTypeChange(section.id, e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs border rounded-md px-1 py-1 bg-white cursor-pointer"
+            >
+              <option value="full">Full</option>
+              <option value="small">Small</option>
+              <option value="proposal">Proposal</option>
+            </select>
             </label>
             <button
               {...attributes}
@@ -212,7 +217,10 @@ export default function SectionsTab() {
       const res = await apiFetch("/sections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: newTitle.trim() }),
+        body: JSON.stringify({ 
+            title: newTitle.trim(),
+            docType: "full" // default
+          }),
       });
 
       if (res.error || res.status === "error") throw new Error("Failed to create section");
@@ -332,22 +340,23 @@ export default function SectionsTab() {
   }, [isDirty, savingOrder, sections]);
 
 
-    const handleCompactToggle = async (id, newCompactValue) => {
+const handleDocTypeChange = async (id, newDocType) => {
   try {
     await apiFetch(`/sections/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ compact: newCompactValue }),
+      body: JSON.stringify({ docType: newDocType }),
     });
 
     setSections((prev) =>
       prev.map((s) =>
-        s.id === id ? { ...s, compact: newCompactValue } : s
+        s.id === id ? { ...s, docType: newDocType } : s
       )
     );
-    showSuccess(newCompactValue ? "Compact Enabled" : "Compact Disabled");
+
+    showSuccess(`DocType updated to ${newDocType}`);
   } catch (err) {
-    console.error("Failed to toggle compact:", err);
+    console.error("Failed to update docType:", err);
   }
 };
 
@@ -486,7 +495,7 @@ export default function SectionsTab() {
           onChangeEdit={(v) => setEditValue(v)}
           onSaveEdit={handleSaveEdit}
           onCancelEdit={handleCancelEdit}
-        onCompactToggle={handleCompactToggle} ss
+        onDocTypeChange={handleDocTypeChange}
         />
       ))}
     </div>
