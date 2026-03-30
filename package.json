@@ -4,54 +4,43 @@
   "description": "HPE Brahma Document Creator - Production Electron App",
   "main": "main.js",
   "author": "HPE",
-
   "scripts": {
     "dev:frontend": "cd frontend && npx next dev",
     "dev:electron": "wait-on http://localhost:3000 && electron .",
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:electron\"",
-
     "build:frontend": "cd frontend && npm install && npm run build",
-
     "build:electron": "npm run build:frontend && npx electron-builder --win --publish never",
     "build:electron:portable": "npm run build:frontend && npx electron-builder --win --publish never -c.win.target=portable",
     "build:electron:dir": "npm run build:frontend && npx electron-builder --dir --win"
   },
-
   "devDependencies": {
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^41.0.3",
     "electron-builder": "^26.8.1"
   },
-
   "dependencies": {
     "wait-on": "^9.0.4"
   },
-
   "build": {
     "appId": "com.document.creator",
     "productName": "Document Creator",
-
     "files": [
       "main.js",
       "preload.js",
-      "wordCom.js",
-      "backend/**/*",
-      "frontend/.next/**/*",
-      "frontend/public/**/*",
-      "frontend/package.json"
+      "wordCom.js"
     ],
-
+    "extraResources": [
+      {
+        "from": "frontend/out",
+        "to": "app/frontend/out",
+        "filter": ["**/*"]
+      }
+    ],
     "asar": true,
-
-    "asarUnpack": [
-      "backend/**/*"
-    ],
-
     "win": {
       "target": "nsis"
     },
-
     "nsis": {
       "oneClick": false,
       "perMachine": false,

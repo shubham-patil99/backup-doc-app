@@ -1,15 +1,17 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "export",  // ✅ Static export for Electron packaging
-  assetPrefix: "./", // ✅ Load generated assets relative to index.html when packaged
+  output: "export",
+  trailingSlash: true,
+  images: {
+    unoptimized: true,
+  },
   eslint: {
-    ignoreDuringBuilds: true, // Allow build even with lint errors
+    ignoreDuringBuilds: true,
   },
   typescript: {
-    ignoreBuildErrors: true, // Skip type errors in production build
+    ignoreBuildErrors: true,
   },
-  trailingSlash: false,
 };
 
 export default nextConfig;

@@ -17,6 +17,7 @@ Thumbs.db
 
 #frontend
 .next
+package-lock.json
 
 # Build folders
 dist/
