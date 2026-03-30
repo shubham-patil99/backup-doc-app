@@ -36,4 +36,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
       return Promise.resolve({ success: false, error: String(err) });
     }
   },
+
+  /**
+   * ✅ NEW: Save document to Downloads, update TOC (if docx), and open email client with attachment.
+   * Params: { base64, fileName, subject, body, fileType }
+   * Returns: { success, filePath, error? }
+   */
+  sendEmailWithAttachment: (params) => {
+    try {
+      return ipcRenderer.invoke("send-email-with-attachment", params);
+    } catch (err) {
+      return Promise.resolve({ success: false, error: String(err) });
+    }
+  },
 });

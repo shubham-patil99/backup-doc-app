@@ -91,7 +91,7 @@ const Draft = sequelize.define("Draft", {
   indexes: [
     {
       unique: true,
-      fields: ['ope_id', 'version']
+      fields: ['ope_id', 'sow_type', 'version']  // ✅ Separate version streams by sowType
     }
   ]
 });

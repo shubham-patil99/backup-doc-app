@@ -27,7 +27,7 @@ export default function UserHeader({ username }) {
         {/* Left Section */}
         <div className="flex items-center gap-3">
           <img src={logo.src} alt="HPE Logo" width={70} height={70} />
-          <span className="text-xl font-bold text-white">Brahma - SOW Creator</span>
+          <span className="text-xl font-bold text-white">Brahma</span>
         </div>
 
         {/* Right Section */}

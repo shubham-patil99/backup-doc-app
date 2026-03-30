@@ -23,13 +23,12 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      const res = await fetch("http://localhost:5431/api/auth/login", {
+      const res = await fetch(`http://localhost:5431/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
         credentials: "include",
       });
-
 
       if (!res.ok) {
         const errData = await res.json();

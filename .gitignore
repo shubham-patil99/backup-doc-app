@@ -15,6 +15,9 @@ Thumbs.db
 # VS Code
 .vscode/
 
+#frontend
+.next
+
 # Build folders
 dist/
 out/

@@ -19,10 +19,9 @@ const Section = sequelize.define('Section', {
     allowNull: true,
     defaultValue: null,
   },
-  compact: {
-    type: DataTypes.BOOLEAN,
+  docType: {
+    type: DataTypes.ENUM("full", "small", "proposal"),
     allowNull: false,
-    defaultValue: false, // 👈 default value (optional)
   },
 }, {
   tableName: 'sections',

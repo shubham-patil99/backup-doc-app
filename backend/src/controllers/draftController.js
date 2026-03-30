@@ -29,18 +29,17 @@ exports.autoSaveDraft = async (req, res) => {
       contentKeys: content ? Object.keys(content) : null,
       documentSectionsLength: content?.documentSections?.length,
       sowType,
-      status,
-      version
+      status
     });
 
     if (!opeId || !userId) {
       return res.status(400).json({ success: false, error: "OPE ID and User ID are required" });
     }
 
-    // ✅ Normalize content - ensure we ALWAYS have a valid structure
-    const normalizedContent = {
-      documentSections: Array.isArray(content?.documentSections)
-        ? content.documentSections.map(section => ({
+    // ✅ Normalize content if explicitly provided
+    const normalizedContent = content && Array.isArray(content.documentSections)
+      ? {
+          documentSections: content.documentSections.map(section => ({
             id: section.id,
             title: section.title || "",
             description: section.description || "",
@@ -51,48 +50,48 @@ exports.autoSaveDraft = async (req, res) => {
                   name: module.name || "",
                   description: module.description || "",
                   sectionId: section.id,
-                  // Persist module order if provided; fall back to array order.
                   position: Number.isFinite(Number(module.position)) ? Number(module.position) : idx
                 }))
               : []
           }))
-        : []
-    };
+        }
+      : null;
 
     console.log("📝 Normalized content:", JSON.stringify(normalizedContent).substring(0, 200));
 
-    // Find latest draft for this OPE/user
+    // ✅ Auto-save: find latest draft for THIS sowType (separate version streams)
+    // Each sowType (FULL, SMALL, PROPOSAL) has independent versioning
+    const effectiveSowType = sowType || 'FULL';
+    console.log("📝 Searching for draft with sowType:", effectiveSowType);
     const latestDraft = await Draft.findOne({
-      where: { opeId, userId },
+      where: { opeId, userId, sowType: effectiveSowType },
       order: [["version", "DESC"]],
     });
 
     if (latestDraft) {
       console.log("📝 Found existing draft, updating...");
-
-      // ✅ NEW: If incoming content is empty but existing draft has content, preserve existing content
-      const shouldUpdateContent = !(normalizedContent.documentSections.length === 0 && latestDraft.content?.documentSections?.length > 0);
-      if (!shouldUpdateContent) {
-        console.log("📝 Skipping content update to preserve existing non-empty content for OPE:", opeId);
-      }
+      const contentUpdated = normalizedContent !== null;
 
       try {
-        await latestDraft.update({
+        const updatePayload = {
           customerName: customerName !== undefined ? customerName : latestDraft.customerName,
           partnerName: partnerName !== undefined ? partnerName : latestDraft.partnerName,
           documentName: documentName !== undefined ? documentName : latestDraft.documentName,
           quoteId: quoteId === "" ? null : (quoteId !== undefined ? quoteId : latestDraft.quoteId),
-          sowType: sowType !== undefined ? sowType : (latestDraft.sowType || 'FULL'),
-          ...(shouldUpdateContent && { content: normalizedContent }),  // Only update content if not skipping
+          sowType: effectiveSowType,  // ✅ ALWAYS update sowType to current value (handles type switches)
+          ...(contentUpdated ? { content: normalizedContent } : {}),
           status: status || latestDraft.status,
-          version: latestDraft.version,
           ...rest
-        });
+        };
+        
+        console.log("📝 Updating draft with sowType:", effectiveSowType, "oldSowType:", latestDraft.sowType);
+        
+        await latestDraft.update(updatePayload);
 
         await latestDraft.reload();
         const latestDraftJson = latestDraft.toJSON();
         latestDraftJson.customerNo = await getCustomerNoByName(latestDraftJson.customerName);
-        console.log("✅ Updated existing draft v" + latestDraft.version + (shouldUpdateContent ? " (content updated)" : " (content preserved)"));
+        console.log("✅ Updated existing draft v" + latestDraft.version + " sowType:" + latestDraft.sowType + (contentUpdated ? " (content updated)" : " (content preserved)"));
         return res.json({ success: true, draft: latestDraftJson });
       } catch (updateError) {
         console.error("❌ Update failed:", updateError);
@@ -133,10 +132,10 @@ exports.autoSaveDraft = async (req, res) => {
         customerName: customerName || null,
         partnerName: partnerName || null,
         documentName: documentName || null,
-        sowType: sowType || 'FULL',
+        sowType: effectiveSowType,  // ✅ Use effectiveSowType (consistent)
         content: normalizedContent,
         status: status || "draft",
-        version: 1,
+        version: 0,
         quoteId: quoteId || null,
         ...rest
       };
@@ -147,7 +146,7 @@ exports.autoSaveDraft = async (req, res) => {
         const draft = await Draft.create(createPayload);
         const draftJson = draft.toJSON();
         draftJson.customerNo = await getCustomerNoByName(draftJson.customerName);
-        console.log("✅ Created new draft v1");
+        console.log(`✅ Created new draft v${draft.version}`);  // ✅ Show actual version created
         return res.json({ success: true, draft: draftJson });
       } catch (createError) {
         console.error("❌ Create failed:", createError);
@@ -178,30 +177,32 @@ exports.autoSaveDraft = async (req, res) => {
             (createError.original && createError.original.code === "23505"));
 
         if (isUniqueViolation) {
-          console.log("⚠️ Unique constraint violation, retrying by searching conflicting row by opeId...");
+          console.log("⚠️ Unique constraint violation, finding existing draft by opeId + userId + sowType...");
 
           try {
-            // Find the existing conflicting draft by opeId (not restricted to userId)
+            // Find the existing conflicting draft by opeId + userId + sowType
             const existing = await Draft.findOne({
-              where: { opeId },
+              where: { opeId, userId, sowType: effectiveSowType },  // ✅ Match query logic from initial search
               order: [["version", "DESC"]],
             });
 
               if (existing) {
               // Update the found draft (merge)
-              await existing.update({
+              const mergePayload = {
                 customerName: customerName !== undefined ? customerName : existing.customerName,
                 partnerName: partnerName !== undefined ? partnerName : existing.partnerName,
                 documentName: documentName !== undefined ? documentName : existing.documentName,
-                sowType: sowType !== undefined ? sowType : (existing.sowType || 'FULL'),
+                sowType: effectiveSowType,  // ✅ ALWAYS update sowType (handles type switches)
                 content: normalizedContent,
                 status: status || existing.status,
-                version: existing.version,
                 ...rest
-              });
+              };
+              
+              console.log("⚠️ Merging with concurrent draft: updating sowType to", effectiveSowType);
+              await existing.update(mergePayload);
 
               await existing.reload();
-              console.log("✅ Updated concurrent existing draft (merged)");
+              console.log("✅ Merged with concurrent draft v" + existing.version + " (sowType: " + existing.sowType + ")");
               const existingJson = existing.toJSON();
               existingJson.customerNo = await getCustomerNoByName(existingJson.customerName);
               return res.json({ success: true, draft: existingJson, note: "created-concurrently, merged-existing" });
@@ -262,7 +263,7 @@ exports.resetDraft = async (req, res) => {
       return res.json({ success: true, draft: latestJson });
     }
 
-    // if no draft exists, create an empty draft record (version 1)
+    // if no draft exists, create an empty draft record (version 0 for auto-save strategy)
     const created = await Draft.create({
       opeId,
       userId,
@@ -270,8 +271,9 @@ exports.resetDraft = async (req, res) => {
       partnerName: null,
       documentName: null,
       content: { documentSections: [] },
+      sowType: 'FULL',  // ✅ Default to FULL
       status: "draft",
-      version: 1,
+      version: 0,  // ✅ Start with version 0
     });
     const createdJson = created.toJSON();
     createdJson.customerNo = await getCustomerNoByName(createdJson.customerName);
@@ -306,7 +308,7 @@ exports.saveDocument = async (req, res) => {
 
     if (status === "final") {
       const lastFinal = await Final.findOne({
-        where: { opeId },
+        where: { opeId, sowType: sowType || 'FULL' },  // ✅ Get latest for THIS sowType
         order: [["version", "DESC"]],
       });
       const latestVersion = lastFinal ? lastFinal.version : 0;
@@ -339,7 +341,7 @@ exports.saveDocument = async (req, res) => {
       return res.json({ success: true, final: finalJson });
     } else {
       const lastDraft = await Draft.findOne({
-        where: { opeId },
+        where: { opeId, sowType: sowType || 'FULL' },  // ✅ Get latest for THIS sowType
         order: [["version", "DESC"]],
       });
       const latestVersion = lastDraft ? lastDraft.version : 0;
@@ -446,9 +448,10 @@ exports.getFinalByOpeAndVersion = async (req, res) => {
 
 exports.getAllDrafts = async (req, res) => {
   try {
-    const { opeId } = req.query;
-    const where = { status: "draft" }; // ✅ ADD THIS
+    const { opeId, sowType } = req.query;
+    const where = { status: "draft" };
     if (opeId) where.opeId = opeId;
+    if (sowType) where.sowType = sowType.toUpperCase();
     const drafts = await Draft.findAll({
       where,
       include: [{ model: User, as: "user", attributes: ["name", "email"] }],
@@ -472,6 +475,7 @@ exports.getAllDrafts = async (req, res) => {
         customerAddress: obj.customerAddress || "",
         engagementResources: obj.engagementResources || [],
         content: obj.content || {},
+        sowType: obj.sowType,
       };
     }));
     res.json({ success: true, drafts: draftsWithNo });
@@ -482,10 +486,11 @@ exports.getAllDrafts = async (req, res) => {
 
 exports.getAllFinals = async (req, res) => {
   try {
-    const { opeId, userId } = req.query;
-    const where = { status: "final" }; // ✅ ADD THIS
+    const { opeId, userId, sowType } = req.query;
+    const where = { status: "final" };
     if (opeId) where.opeId = opeId;
     if (userId) where.userId = userId;
+    if (sowType) where.sowType = sowType.toUpperCase();
     const finals = await Final.findAll({
       where,
       include: [{ model: User, as: "user", attributes: ["name", "email"] }],
@@ -509,6 +514,7 @@ exports.getAllFinals = async (req, res) => {
         customerAddress: obj.customerAddress || "",
         engagementResources: obj.engagementResources || [],
         content: obj.content || {},
+        sowType: obj.sowType || "FULL",
       };
     }));
     res.json({ success: true, finals: finalsWithNo });
@@ -520,32 +526,45 @@ exports.getAllFinals = async (req, res) => {
 exports.getDraftByOpe = async (req, res) => {
   try {
     const { opeId } = req.params;
-    console.log("[getDraftByOpe] Fetching draft for OPE:", opeId);
+    const { sowType } = req.query;  // ✅ Optional: filter by sowType for current document type
+    const effectiveSowType = sowType ? sowType.toUpperCase() : null;
     
-    // ✅ Always fetch LATEST draft version for this OPE
-    // Use explicit attributes to avoid selecting columns that don't exist
+    console.log("[getDraftByOpe] Fetching draft for OPE:", opeId, "sowType:", effectiveSowType || "any");
+    
+    // ✅ Fetch LATEST draft for this OPE (optionally filtered by sowType)
+    // If sowType provided, gets latest draft for that specific type
+    // If not provided, gets latest across all types
+    const whereClause = { opeId, status: "draft" };
+    if (effectiveSowType) {
+      whereClause.sowType = effectiveSowType;  // ✅ Filter by sowType if specified
+    }
+    
     const draft = await Draft.findOne({
-      where: { opeId, status: "draft" }, // also filter by status
-      order: [["version", "DESC"]], // GET LATEST
+      where: whereClause,
+      order: [["version", "DESC"]],
       attributes: ['id', 'opeId', 'userId', 'customerName', 'customerEmail', 'partnerName', 'customerAddress', 'content', 'sowType', 'status', 'version', 'fileName', 'quoteId', 'createdAt', 'updatedAt']
     });
     
-    console.log("[getDraftByOpe] Draft found:", draft ? "Yes" : "No");
+    console.log("[getDraftByOpe] Draft found:", draft ? `Yes (sowType: ${draft.sowType})` : "No");
     
     if (!draft) {
-      // No draft found — try returning the latest final as a fallback so the
-      // frontend still receives top-level fields (customerName, partnerName, quoteId)
-      const latestFinal = await Final.findOne({ where: { opeId }, order: [["version", "DESC"]] });
+      // No draft found — try returning the latest final as a fallback
+      const finalWhere = { opeId };
+      if (effectiveSowType) {
+        finalWhere.sowType = effectiveSowType;  // ✅ Also filter final by sowType
+      }
+      const latestFinal = await Final.findOne({ where: finalWhere, order: [["version", "DESC"]] });
       if (latestFinal) {
         console.log("[getDraftByOpe] No draft, returning latest final as draft fallback");
         const finalJson = latestFinal.toJSON();
         finalJson.customerNo = await getCustomerNoByName(finalJson.customerName);
         return res.json({ success: true, draft: finalJson });
       }
-      return res.status(404).json({ success: false, error: "Draft not found" });
+      return res.status(404).json({ success: false, error: "No draft found for specified sowType" });
     }
     const out = draft.toJSON();
     out.customerNo = await getCustomerNoByName(out.customerName);
+    console.log("[getDraftByOpe] ✅ Returning draft v" + out.version + " (sowType: " + out.sowType + ")");
     res.json({ success: true, draft: out });
   } catch (error) {
     console.error("[getDraftByOpe] Error fetching draft:", error.message);
@@ -643,18 +662,19 @@ exports.updateOpeId = async (req, res) => {
       partnerName: latestOldDraft.partnerName,
       customerAddress: latestOldDraft.customerAddress,
       engagementResources: latestOldDraft.engagementResources,
+      sowType: latestOldDraft.sowType,  // ✅ Preserve sowType
       content: latestOldDraft.content,
       fileName: latestOldDraft.fileName,
       quoteId: latestOldDraft.quoteId,
       status: "draft",
-      version: 1,
+      version: 0,  // ✅ Start fresh with version 0 for new OPE ID
     });
 
     const newDraftJson = newDraft.toJSON();
     newDraftJson.customerNo = await getCustomerNoByName(newDraftJson.customerName);
     return res.json({
       success: true,
-      message: "New OPE ID created successfully with version 1.",
+      message: "New OPE ID created successfully with version 0.",
       draft: newDraftJson,
     });
   } catch (error) {
