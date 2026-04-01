@@ -16,8 +16,8 @@ Thumbs.db
 .vscode/
 
 #frontend
-.next
-package-lock.json
+.next/
+frontend/package-lock.json
 
 # Build folders
 dist/

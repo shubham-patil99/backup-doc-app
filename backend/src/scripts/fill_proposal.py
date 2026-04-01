@@ -9,18 +9,11 @@ Template: hpe-proposal-template.pptx  (3 slides)
   Slide 1  "Title and Content" -- {{breadcrumb}} / {{moduleNum}} {{moduleName}} / {{moduleBody}}
   Slide 2  "Thank You"         -- closing slide
 
-Supported layouts in data.json -> slides[]:
-  LAYOUT_COVER    -- cover slide
-  LAYOUT_CONTENT  -- one slide per module, text body (no table)
-  LAYOUT_TABLE    -- one slide per section, table of modules (classic)
-  LAYOUT_HTML     -- one slide per module, HTML description parsed:
-                     paragraph text -> content placeholder
-                     <table> elements -> real PPTX tables stacked below text
-  LAYOUT_CLOSING  -- closing slide
-
-Key fix for split runs:
-  PowerPoint stores "{{token}}" as three runs: ['{{','token','}}'].
-  replace_in_paragraph() merges all runs into run[0] before substituting.
+Key architecture decision:
+  Body content is NEVER written into the placeholder (idx=1).
+  The placeholder is always cleared and removed after header tokens are filled.
+  ALL body text and tables are rendered as explicitly positioned textboxes/tables
+  so that spacing, indent, and font are 100% consistent across every slide.
 """
 
 import sys, json, copy, html as html_mod, re
@@ -40,50 +33,58 @@ PML = "http://schemas.openxmlformats.org/presentationml/2006/main"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 # ── Design constants ──────────────────────────────────────────────────────────
-HPE_GREEN   = RGBColor(0x00, 0x60, 0x35)
-STRIPE_ODD  = RGBColor(0xF2, 0xF2, 0xF2)
-STRIPE_EVN  = RGBColor(0xFF, 0xFF, 0xFF)
-WHITE       = RGBColor(0xFF, 0xFF, 0xFF)
-TEXT_DARK   = RGBColor(0x1A, 0x1A, 0x1A)
+HPE_GREEN  = RGBColor(0x00, 0x60, 0x35)
+STRIPE_ODD = RGBColor(0xF2, 0xF2, 0xF2)
+STRIPE_EVN = RGBColor(0xFF, 0xFF, 0xFF)
+WHITE      = RGBColor(0xFF, 0xFF, 0xFF)
+TEXT_DARK  = RGBColor(0x1A, 0x1A, 0x1A)
 
-SLIDE_W  = Inches(13.33)
-SLIDE_H  = Inches(7.50)
+SLIDE_W = Inches(13.33)
+SLIDE_H = Inches(7.50)
 
-# Safe content area (below header, above footer)
+# ── Layout geometry ───────────────────────────────────────────────────────────
+# The template header (breadcrumb + module title) occupies the top ~1.10"
+# We start body content at 1.15" and allow it to run to 7.20"
 CONTENT_LEFT   = Inches(0.42)
-CONTENT_TOP    = Inches(1.55)   # start below breadcrumb/title area
-CONTENT_WIDTH  = Inches(12.47)
-CONTENT_BOTTOM = Inches(6.65)   # leave ~0.85" for footer
-CONTENT_HEIGHT = int(CONTENT_BOTTOM) - int(CONTENT_TOP)
-
-# Header/title area used on content slides (module name row)
-HEADER_TOP  = Inches(0.65)
-HEADER_H    = Inches(0.55)
+CONTENT_TOP    = Inches(1.15)   # where body textboxes start
+CONTENT_WIDTH  = Inches(12.49)
+CONTENT_BOTTOM = Inches(7.00)   # safe bottom margin above footer (was 7.20)
 
 # Table geometry
-TABLE_LEFT    = Inches(0.42)
-TABLE_W       = Inches(12.47)
-TABLE_ROW_H   = Emu(int(Inches(0.42)))  # each data row height in EMU
-TABLE_HDR_H   = Emu(int(Inches(0.42)))  # header row height in EMU
+TABLE_LEFT  = Inches(0.42)
+TABLE_W     = Inches(12.49)
+TABLE_ROW_H = Emu(int(Inches(0.40)))
+TABLE_HDR_H = Emu(int(Inches(0.40)))
 
 # Font sizes
-FONT_BODY   = Pt(11)
-FONT_TABLE  = Pt(10)
-FONT_HDR    = Pt(10)
+FONT_BODY  = Pt(9.5)
+FONT_TABLE = Pt(9.5)
+FONT_HDR   = Pt(9.5)
 
-# ── Overflow / pagination constants ───────────────────────────────────────────
-# Max lines of text that fit in the content area (approx at 11pt)
-MAX_LINES_PER_CONTENT = 16
-# Max table DATA rows (excluding header) per slide
-MAX_TABLE_ROWS_PER_SLIDE = 14
+# ── Pagination constants ──────────────────────────────────────────────────────
+# FIX: Increased from 30 — available height is ~5.85" at 0.14"/line ≈ 41 lines
+MAX_LINES_PER_SLIDE      = 34
+MAX_TABLE_ROWS_PER_SLIDE = 16
 
-# Line/spacing metrics that MUST match between slide1 placeholder and continuation textboxes
-# 11pt font at 1.15 line-spacing = ~0.195"; use 0.20" as a safe round number
-TEXT_LINE_H  = Inches(0.20)   # height per rendered line  (used everywhere)
-TEXT_GAP     = Inches(0.12)   # gap between stacked blocks
+# FIX: Corrected rendering metrics
+# At 9.5pt with 115% line spacing: 9.5pt * 1.15 = 10.925pt ≈ 0.152" per line
+# Add a small buffer → 0.155" per line (was 0.178" — 15% too tall)
+LINE_H   = Inches(0.155)   # height of one rendered line at FONT_BODY / 115%
+TEXT_GAP = Inches(0.06)    # vertical gap between stacked text blocks (was 0.08)
+
+# FIX: CHARS_PER_LINE calibration
+# Content width = 12.49". At 9.5pt, ~7px/char in pptx units → ~1" ≈ 14 chars
+# 12.49" * ~14.3 chars/inch ≈ 179 chars per line
+# Use 160 to be slightly conservative but not absurdly so (was 100 — way too low)
+CHARS_PER_LINE = 160
+
+# ── List indent geometry ──────────────────────────────────────────────────────
+LIST_HANG   = int(Inches(0.20))   # hanging indent
+LIST_BASE_L = int(Inches(0.30))   # left margin for depth-0 list items
+LIST_DEPTH  = int(Inches(0.18))   # extra indent per nesting level
 
 
-# ─── HTML helpers ─────────────────────────────────────────────────────────────
+# ─── HTML → line blocks ───────────────────────────────────────────────────────
 
 def _cell_text(td) -> str:
     return " ".join(td.get_text(separator=" ").split())
@@ -91,97 +92,199 @@ def _cell_text(td) -> str:
 
 def html_to_blocks(raw_html: str):
     """
-    Parse HTML string into blocks:
-      {"type": "text",  "content": "plain text …"}
-      {"type": "table", "rows": [["col1","col2",…], …]}
+    Convert HTML to a list of blocks:
+      {"type": "text",  "lines": [{"text": str, "depth": int, "kind": str}]}
+      {"type": "table", "rows": [[str, ...], ...]}
+
+    kind: "normal" | "bullet" | "numbered" | "heading" | "blank"
+    depth: nesting level (0=top, 1=nested, ...)
+    numbered lines also carry "counter": int
     """
     if not raw_html:
         return []
 
     if not HAS_BS4:
-        text = strip_html_plain(raw_html)
-        return [{"type": "text", "content": text}] if text else []
+        text = _strip_html_plain(raw_html)
+        if not text:
+            return []
+        lines = [{"text": ln, "depth": 0, "kind": "normal"}
+                 for ln in text.split("\n") if ln.strip()]
+        return [{"type": "text", "lines": lines}]
 
-    soup = BeautifulSoup(raw_html, "html.parser")
+    soup   = BeautifulSoup(raw_html, "html.parser")
     blocks = []
+    lines  = []
 
-    def norm(text):
-        return " ".join(str(text).split())
+    def flush():
+        real = [l for l in lines if l.get("kind") != "blank" or True]
+        # Keep blanks for spacing but filter completely empty result
+        content = [l for l in real if l.get("text", "").strip() or l.get("kind") == "blank"]
+        if any(l.get("text", "").strip() for l in content):
+            blocks.append({"type": "text", "lines": list(content)})
+        lines.clear()
 
-    def flush(buf):
-        t = " ".join(buf).strip()
-        if t:
-            blocks.append({"type": "text", "content": t})
-        buf.clear()
+    def norm(s):
+        return html_mod.unescape(" ".join(str(s).split()))
 
-    text_buf = []
+    def parse_node(el, depth=0):
+        tag = getattr(el, "name", None)
 
-    def add_text(val):
-        t = norm(val)
-        if t:
-            text_buf.append(html_mod.unescape(t))
+        if isinstance(el, NavigableString):
+            t = norm(el)
+            if t:
+                lines.append({"text": t, "depth": depth, "kind": "normal"})
+            return
 
-    def parse_table(el):
-        rows = []
-        for tr in el.find_all("tr"):
-            cells = [_cell_text(td) for td in tr.find_all(["td", "th"])]
-            if any(cells):
-                rows.append(cells)
-        if rows:
-            flush(text_buf)
-            blocks.append({"type": "table", "rows": rows})
+        if tag in ("script", "style"):
+            return
 
-    def parse_list(el, ordered=False):
-        flush(text_buf)
-        items = []
-        for idx, li in enumerate(el.find_all("li", recursive=False), start=1):
-            item_text = norm(li.get_text(separator=" ", strip=True))
-            if not item_text:
-                continue
-            prefix = f"{idx}. " if ordered else "\u2022 "
-            items.append(prefix + html_mod.unescape(item_text))
-        if items:
-            blocks.append({"type": "text", "content": "\n".join(items)})
+        if tag == "br":
+            lines.append({"text": "", "depth": 0, "kind": "blank"})
+            return
 
-    for child in soup.contents:
-        if isinstance(child, NavigableString):
-            add_text(child)
-            continue
-        tag = getattr(child, "name", None)
         if tag == "table":
-            parse_table(child)
-        elif tag in ("p", "div", "section", "article", "header", "footer", "blockquote"):
-            flush(text_buf)
-            text = norm(child.get_text(separator=" ", strip=True))
-            if text:
-                blocks.append({"type": "text", "content": html_mod.unescape(text)})
-        elif tag == "br":
-            add_text(" ")
-        elif tag == "ul":
-            parse_list(child, ordered=False)
-        elif tag == "ol":
-            parse_list(child, ordered=True)
-        else:
-            text = norm(child.get_text(separator=" ", strip=True))
-            if text:
-                text_buf.append(html_mod.unescape(text))
+            flush()
+            rows = []
+            for tr in el.find_all("tr"):
+                cells = [_cell_text(td) for td in tr.find_all(["td", "th"])]
+                if any(cells):
+                    rows.append(cells)
+            if rows:
+                blocks.append({"type": "table", "rows": rows})
+            return
 
-    flush(text_buf)
-    return blocks
+        if tag in ("ul", "ol"):
+            lines.append({"text": "", "depth": 0, "kind": "blank"})
+            for idx, li in enumerate(el.find_all("li", recursive=False), start=1):
+                direct_parts = []
+                sub_lists    = []
+                for child in li.children:
+                    child_tag = getattr(child, "name", None)
+                    if child_tag in ("ul", "ol"):
+                        sub_lists.append(child)
+                    elif isinstance(child, NavigableString):
+                        t = norm(child)
+                        if t:
+                            direct_parts.append(t)
+                    else:
+                        t = norm(child.get_text(separator=" ", strip=True))
+                        if t:
+                            direct_parts.append(t)
+
+                item_text = " ".join(direct_parts).strip()
+                if item_text:
+                    if tag == "ol":
+                        lines.append({
+                            "text": item_text, "depth": depth,
+                            "kind": "numbered", "counter": idx,
+                        })
+                    else:
+                        lines.append({
+                            "text": item_text, "depth": depth, "kind": "bullet",
+                        })
+
+                for sub in sub_lists:
+                    parse_node(sub, depth=depth + 1)
+
+            lines.append({"text": "", "depth": 0, "kind": "blank"})
+            return
+
+        if tag in ("p", "div", "section", "article", "blockquote"):
+            lines.append({"text": "", "depth": 0, "kind": "blank"})
+            for child in el.children:
+                parse_node(child, depth)
+            lines.append({"text": "", "depth": 0, "kind": "blank"})
+            return
+
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            lines.append({"text": "", "depth": 0, "kind": "blank"})
+            t = norm(el.get_text(separator=" ", strip=True))
+            if t:
+                lines.append({"text": t, "depth": depth, "kind": "heading"})
+            lines.append({"text": "", "depth": 0, "kind": "blank"})
+            return
+
+        if tag in ("strong", "b", "em", "i", "span", "a", "label", "u", "code"):
+            t = norm(el.get_text(separator=" ", strip=True))
+            if t:
+                lines.append({"text": t, "depth": depth, "kind": "normal"})
+            return
+
+        for child in el.children:
+            parse_node(child, depth)
+
+    for top_child in soup.children:
+        parse_node(top_child, depth=0)
+
+    flush()
+
+    # Collapse consecutive blank lines to at most one; strip leading/trailing blanks
+    cleaned = []
+    for blk in blocks:
+        if blk["type"] != "text":
+            cleaned.append(blk)
+            continue
+        result    = []
+        prev_blank = False
+        for ln in blk["lines"]:
+            is_blank = (ln.get("kind") == "blank" or not ln.get("text", "").strip())
+            if is_blank:
+                if not prev_blank:
+                    result.append({"text": "", "depth": 0, "kind": "blank"})
+                prev_blank = True
+            else:
+                result.append(ln)
+                prev_blank = False
+        while result and not result[0].get("text", "").strip():
+            result.pop(0)
+        while result and not result[-1].get("text", "").strip():
+            result.pop()
+        if result:
+            cleaned.append({"type": "text", "lines": result})
+
+    return cleaned
 
 
-def strip_html_plain(raw: str) -> str:
+def _strip_html_plain(raw: str) -> str:
     if not raw:
         return ""
-    text = re.sub(r"<br\s*/?>",         "\n", raw,  flags=re.I)
-    text = re.sub(r"</p\s*>",           "\n", text, flags=re.I)
-    text = re.sub(r"</li\s*>",          "\n", text, flags=re.I)
-    text = re.sub(r"<li[^>]*>",         "\u2022 ", text, flags=re.I)
-    text = re.sub(r"</?(ul|ol)[^>]*>",  "\n", text, flags=re.I)
-    text = re.sub(r"<[^>]+>",           "",   text)
+    text = re.sub(r"<br\s*/?>",        "\n", raw,  flags=re.I)
+    text = re.sub(r"</p\s*>",          "\n", text, flags=re.I)
+    text = re.sub(r"</li\s*>",         "\n", text, flags=re.I)
+    text = re.sub(r"<li[^>]*>",        "\u2022 ", text, flags=re.I)
+    text = re.sub(r"</?(ul|ol)[^>]*>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>",          "",   text)
     text = html_mod.unescape(text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+# ─── Line height estimator ────────────────────────────────────────────────────
+
+def _estimate_lines(line_objects: list) -> int:
+    """
+    FIX: Use CHARS_PER_LINE = 160 (calibrated for 12.49" content width at 9.5pt).
+    Previously used 100 which caused 60% over-estimation of wrapping, making
+    content appear to overflow when it had plenty of space remaining.
+    """
+    total = 0
+    for ln in line_objects:
+        if ln.get("kind") == "blank" or not ln.get("text", "").strip():
+            total += 1
+            continue
+        # Indented list items have slightly narrower effective width
+        depth_penalty = ln.get("depth", 0) * 8   # was *4, but chars not pixels
+        effective     = max(80, CHARS_PER_LINE - depth_penalty)
+        total += max(1, (len(ln["text"]) + effective - 1) // effective)
+    return total
+
+
+def _lines_height_emu(line_objects: list) -> int:
+    return int(_estimate_lines(line_objects) * int(LINE_H)) + int(TEXT_GAP)
+
+
+def _fits(current_y: int, needed_emu: int) -> bool:
+    return (current_y + needed_emu) <= int(CONTENT_BOTTOM)
 
 
 # ─── Slide cloning ────────────────────────────────────────────────────────────
@@ -201,17 +304,15 @@ def clone_slide(prs: Presentation, src_slide):
         if old_bg is not None:
             dst_el.remove(old_bg)
         dst_el.insert(0, copy.deepcopy(src_bg))
-    new_slide.name = src_slide.name
-    # Enforce consistent slide dimensions on every clone so all slides are identical size
+    new_slide.name   = src_slide.name
     prs.slide_width  = SLIDE_W
     prs.slide_height = SLIDE_H
     return new_slide
 
 
-# ─── Body-placeholder normalisation helpers ──────────────────────────────────
+# ─── Placeholder utilities ────────────────────────────────────────────────────
 
-def _get_body_placeholder(slide, ph_idx: int = 1):
-    """Return the body placeholder shape (idx=1) or None."""
+def _get_placeholder(slide, ph_idx: int):
     for shape in slide.shapes:
         try:
             if (shape.has_text_frame and
@@ -223,100 +324,38 @@ def _get_body_placeholder(slide, ph_idx: int = 1):
     return None
 
 
-def _normalize_placeholder_font(slide, ph_idx: int = 1,
-                                  font_size: Pt = FONT_BODY):
-    """
-    Walk every run inside placeholder ph_idx and enforce a single font size.
-    This ensures {{moduleBody}} text looks the same across all generated slides
-    regardless of what font size the template or editor embedded.
-    """
-    shape = _get_body_placeholder(slide, ph_idx)
-    if shape is None:
-        return
-    for para in shape.text_frame.paragraphs:
-        for run in para.runs:
-            run.font.size = font_size
-            # Keep colour consistent too
-            if run.font.color.type is None:
-                run.font.color.rgb = TEXT_DARK
+def _remove_placeholder(slide, ph_idx: int):
+    spTree = slide.shapes._spTree
+    to_rm  = []
+    for shape in slide.shapes:
+        try:
+            if (shape.placeholder_format is not None and
+                    shape.placeholder_format.idx == ph_idx):
+                to_rm.append(shape._element)
+        except Exception:
+            pass
+    for el in to_rm:
+        spTree.remove(el)
 
 
 def _fit_text_in_body_placeholder(slide, ph_idx: int = 1,
-                                    min_font: Pt = Pt(8),
+                                    min_font: Pt = Pt(7),
                                     target_font: Pt = FONT_BODY):
-    """
-    After fill_slide() has injected text into placeholder ph_idx:
-      1. Set word_wrap = True and enable auto-fit so PowerPoint will not
-         clip the text box.
-      2. Walk every run and normalise font size to target_font.
-      3. If the text is longer than the placeholder can comfortably show at
-         target_font, step the font down in 0.5pt increments (floor = min_font)
-         until the estimated line count fits within the placeholder height.
-
-    The function uses the placeholder's actual EMU dimensions, so it works
-    regardless of where the template placed the text box.
-    """
-    shape = _get_body_placeholder(slide, ph_idx)
+    shape = _get_placeholder(slide, ph_idx)
     if shape is None:
         return
-
     tf = shape.text_frame
     tf.word_wrap = True
-
-    # Enable PowerPoint's built-in "shrink text on overflow" as a safety net
-    from pptx.enum.text import PP_ALIGN
-    from pptx.oxml.ns import nsmap
     try:
-        # spAutoFit — lets the text box grow; normAutoFit shrinks font
         txBody = tf._txBody
-        # Remove any existing bodyPr autofit elements and set normAutoFit
         bodyPr = txBody.find(qn("a:bodyPr"))
         if bodyPr is not None:
             for tag in ("a:spAutoFit", "a:normAutoFit", "a:noAutofit"):
                 for el in bodyPr.findall(qn(tag)):
                     bodyPr.remove(el)
-            # normAutoFit: PowerPoint shrinks font automatically to fit
             etree.SubElement(bodyPr, qn("a:normAutoFit"))
     except Exception:
         pass
-
-    # Get placeholder dimensions in EMU
-    ph_height = int(shape.height)  # EMU
-    ph_width  = int(shape.width)   # EMU
-
-    # Collect full text to estimate line count
-    full_text = "\n".join(
-        "".join(r.text for r in para.runs)
-        for para in tf.paragraphs
-    )
-
-    # Binary-search-style: step down from target_font until it fits
-    font_pt = float(target_font.pt)
-    min_pt  = float(min_font.pt)
-
-    while font_pt >= min_pt:
-        # Estimate chars per line at this font size: width / (font_pt * 0.55 EMU_per_pt)
-        # 1 pt = 12700 EMU; average char width ~0.55x font size
-        char_w_emu   = font_pt * 12700 * 0.55
-        chars_per_ln = max(1, int(ph_width / char_w_emu))
-        line_h_emu   = font_pt * 12700 * 1.25  # 1.25 line-height
-
-        total_lines = 0
-        for line in full_text.split("\n"):
-            total_lines += max(1, (len(line) + chars_per_ln - 1) // chars_per_ln)
-
-        needed_h = total_lines * line_h_emu
-        if needed_h <= ph_height or font_pt <= min_pt:
-            break
-        font_pt -= 0.5
-
-    # Apply the chosen font size to all runs
-    chosen = Pt(max(font_pt, min_pt))
-    for para in tf.paragraphs:
-        for run in para.runs:
-            run.font.size = chosen
-            if run.font.color.type is None:
-                run.font.color.rgb = TEXT_DARK
 
 
 # ─── Text replacement (handles split runs) ───────────────────────────────────
@@ -358,6 +397,94 @@ def fill_slide(slide, fields: dict):
         fill_shape(shape, fields)
 
 
+# ─── Core textbox writer ──────────────────────────────────────────────────────
+
+def _write_lines_to_textbox(slide, line_objects: list, top_emu: int) -> int:
+    """
+    Write line_objects into a new textbox.  Returns new Y (bottom + gap).
+    Each line dict: {"text": str, "depth": int, "kind": str, "counter"?: int}
+    """
+    if not line_objects:
+        return top_emu
+
+    n_lines = _estimate_lines(line_objects)
+    height  = int(n_lines * int(LINE_H)) + int(Inches(0.10))
+
+    txBox = slide.shapes.add_textbox(
+        int(CONTENT_LEFT), top_emu,
+        int(CONTENT_WIDTH), height,
+    )
+    tf = txBox.text_frame
+    tf.word_wrap = True
+
+    for i, ln in enumerate(line_objects):
+        para = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+
+        kind     = ln.get("kind", "normal")
+        depth    = ln.get("depth", 0)
+        text     = ln.get("text", "")
+        counter  = ln.get("counter", 1)
+        is_blank = (kind == "blank" or not text.strip())
+
+        run = para.add_run()
+
+        if is_blank:
+            run.text      = " "
+            run.font.size = Pt(3)
+        else:
+            if kind == "numbered":
+                run.text = f"{counter}. {text}"
+            elif kind == "bullet":
+                run.text = f"\u2022 {text}"
+            else:
+                run.text = text
+
+            run.font.size      = FONT_BODY
+            run.font.color.rgb = TEXT_DARK
+            run.font.bold      = (kind == "heading")
+
+        try:
+            pPr = para._p.get_or_add_pPr()
+
+            # Line spacing — 115%
+            lnSpc  = etree.SubElement(pPr, qn("a:lnSpc"))
+            lnPct  = etree.SubElement(lnSpc, qn("a:spcPct"))
+            lnPct.set("val", "115000")
+
+            # Space after
+            spcAft    = etree.SubElement(pPr, qn("a:spcAft"))
+            spcAftPts = etree.SubElement(spcAft, qn("a:spcPts"))
+            if is_blank:
+                spcAftPts.set("val", "0")
+            elif kind == "heading":
+                spcAftPts.set("val", "180")
+            elif kind in ("bullet", "numbered"):
+                spcAftPts.set("val", "120")
+            else:
+                spcAftPts.set("val", "60")
+
+            # Space before heading (visual section break)
+            spcBef    = etree.SubElement(pPr, qn("a:spcBef"))
+            spcBefPts = etree.SubElement(spcBef, qn("a:spcPts"))
+            if kind == "heading" and i > 0:
+                spcBefPts.set("val", "160")
+            else:
+                spcBefPts.set("val", "0")
+
+            # Indent for list items
+            if kind in ("bullet", "numbered"):
+                margin_l = LIST_BASE_L + depth * LIST_DEPTH + LIST_HANG
+                pPr.set("marL",   str(margin_l))
+                pPr.set("indent", str(-LIST_HANG))
+            elif depth > 0:
+                pPr.set("marL", str(depth * LIST_DEPTH))
+
+        except Exception:
+            pass
+
+    return top_emu + height + int(TEXT_GAP)
+
+
 # ─── PPTX table builder ───────────────────────────────────────────────────────
 
 def _set_cell_bg(cell, rgb: RGBColor):
@@ -371,13 +498,8 @@ def _set_cell_bg(cell, rgb: RGBColor):
     srgbClr.set("val", str(rgb).upper())
 
 
-def _add_pptx_table(slide, rows: list,
-                    left=None, top=None, width=None,
-                    first_row_is_header=True) -> int:
-    """
-    Add a table to the slide. Returns the bottom-edge EMU of the table.
-    All row heights are set explicitly to prevent PowerPoint from auto-expanding.
-    """
+def _add_pptx_table(slide, rows: list, left=None, top=None,
+                    width=None, first_row_is_header=True) -> int:
     if not rows:
         return int(top) if top is not None else int(CONTENT_TOP)
 
@@ -389,57 +511,66 @@ def _add_pptx_table(slide, rows: list,
     top_emu   = int(top)   if top   is not None else int(CONTENT_TOP)
     width_emu = int(width) if width is not None else int(TABLE_W)
 
-    row_h_emu = int(TABLE_ROW_H)
-    hdr_h_emu = int(TABLE_HDR_H)
+    row_h = int(TABLE_ROW_H)
+    hdr_h = int(TABLE_HDR_H)
 
-    # Calculate total table height
-    if first_row_is_header:
-        height_emu = hdr_h_emu + (n_rows - 1) * row_h_emu
-    else:
-        height_emu = n_rows * row_h_emu
+    # Compute per-row heights and their exact sum — no padding, no stretching
+    row_heights = [hdr_h if (ri == 0 and first_row_is_header) else row_h
+                   for ri in range(n_rows)]
+    exact_height = sum(row_heights)
 
-    # Hard clamp: never exceed content area bottom
-    max_h = int(CONTENT_BOTTOM) - top_emu
-    height_emu = min(height_emu, max(max_h, row_h_emu))
-
+    # Create table with the exact height; we re-enforce it below after row heights are set
     tbl_shape = slide.shapes.add_table(
-        n_rows, n_cols,
-        left_emu, top_emu, width_emu, height_emu
+        n_rows, n_cols, left_emu, top_emu, width_emu, exact_height
     )
     tbl = tbl_shape.table
 
-    # Equal column widths — distribute any rounding remainder to last column
     base_w    = width_emu // n_cols
     remainder = width_emu - base_w * n_cols
     for ci in range(n_cols):
         tbl.columns[ci].width = base_w + (remainder if ci == n_cols - 1 else 0)
 
-    # Populate and style cells
     for ri, row_data in enumerate(rows):
-        is_header = (ri == 0 and first_row_is_header)
-        bg = HPE_GREEN if is_header else (STRIPE_ODD if ri % 2 == 1 else STRIPE_EVN)
+        is_hdr = ri == 0 and first_row_is_header
+        bg     = HPE_GREEN if is_hdr else (STRIPE_ODD if ri % 2 == 1 else STRIPE_EVN)
         for ci, val in enumerate(row_data[:n_cols]):
             cell = tbl.cell(ri, ci)
             cell.text = str(val or "")
             cell.text_frame.word_wrap = True
             for para in cell.text_frame.paragraphs:
                 for run in para.runs:
-                    run.font.size = FONT_HDR if is_header else FONT_TABLE
-                    if is_header:
-                        run.font.bold = True
+                    run.font.size = FONT_HDR if is_hdr else FONT_TABLE
+                    if is_hdr:
+                        run.font.bold      = True
                         run.font.color.rgb = WHITE
                     else:
                         run.font.color.rgb = TEXT_DARK
             _set_cell_bg(cell, bg)
 
-    # Explicitly set every row height to prevent corruption / auto-expand
-    for ri in range(n_rows):
-        if ri == 0 and first_row_is_header:
-            tbl.rows[ri].height = hdr_h_emu
-        else:
-            tbl.rows[ri].height = row_h_emu
+    # Set each row height explicitly
+    for ri, rh in enumerate(row_heights):
+        tbl.rows[ri].height = rh
 
-    return top_emu + height_emu
+    # Force the graphic frame bounding box to exactly the sum of row heights.
+    # python-pptx's add_table() stores height in <p:xfrm><a:ext cy="..."/>
+    # inside the <p:graphicFrame> element.  We patch it directly so there is
+    # zero gap between the last row and whatever follows.
+    try:
+        sp_el = tbl_shape._element          # <p:graphicFrame>
+        # Walk: p:graphicFrame/p:xfrm/a:ext  (NOT a:xfrm — that's for shapes)
+        pxfrm = sp_el.find(qn('p:xfrm'))
+        if pxfrm is not None:
+            aext = pxfrm.find(qn('a:ext'))
+            if aext is not None:
+                aext.set('cy', str(exact_height))
+        # Also try the off/ext inside xfrm for older pptx builds
+        for aext in sp_el.iter(qn('a:ext')):
+            aext.set('cy', str(exact_height))
+            break
+    except Exception:
+        pass
+
+    return top_emu + exact_height
 
 
 # ─── Slide removal ────────────────────────────────────────────────────────────
@@ -456,324 +587,189 @@ def remove_slide(prs, idx: int):
             pass
 
 
-# ─── Placeholder utilities ────────────────────────────────────────────────────
+# ─── Content slide factory ────────────────────────────────────────────────────
 
-def _remove_placeholder_by_idx(slide, ph_idx: int):
-    """Remove a placeholder shape by its placeholder index."""
-    try:
-        spTree = slide.shapes._spTree
-        to_rm  = []
-        for shape in slide.shapes:
-            try:
-                if (shape.placeholder_format is not None and
-                        shape.placeholder_format.idx == ph_idx):
-                    to_rm.append(shape._element)
-            except Exception:
-                pass
-        for el in to_rm:
-            spTree.remove(el)
-    except Exception:
-        pass
-
-
-def _set_placeholder_text(slide, ph_idx: int, text: str, font_size=None):
-    """Write text into a placeholder identified by idx."""
-    for shape in slide.shapes:
-        try:
-            if (shape.has_text_frame and
-                    shape.placeholder_format is not None and
-                    shape.placeholder_format.idx == ph_idx):
-                tf = shape.text_frame
-                tf.clear()
-                para = tf.paragraphs[0]
-                run  = para.add_run()
-                run.text = text
-                if font_size:
-                    run.font.size = font_size
-                return shape
-        except Exception:
-            pass
-    return None
-
-
-# ─── Content pagination engine ────────────────────────────────────────────────
-
-def _estimate_text_lines(text: str) -> int:
+def _make_content_slide(prs, content_src,
+                         breadcrumb: str, moduleNum: str, moduleName: str):
     """
-    Estimate rendered line count at FONT_BODY (11pt) across CONTENT_WIDTH.
-    Uses the same CHARS_PER_LINE value everywhere so slide1 placeholder and
-    continuation text-boxes produce identical visual spacing.
-    Average char width at 11pt ~6.2pt; CONTENT_WIDTH 12.47" * 72 / 6.2 ~= 145.
-    Real-world wrap is tighter due to padding/margins; 95 is a reliable value.
-    """
-    if not text:
-        return 0
-    CHARS_PER_LINE = 95
-    total = 0
-    for line in text.split("\n"):
-        total += max(1, (len(line) + CHARS_PER_LINE - 1) // CHARS_PER_LINE)
-    return total
-
-
-def _text_block_height_emu(text: str) -> int:
-    """Estimate EMU height for a text block including one trailing gap."""
-    lines = _estimate_text_lines(text)
-    return int(lines * int(TEXT_LINE_H)) + int(TEXT_GAP)
-
-
-def _table_height_emu(data_rows: int, with_header: bool = True) -> int:
-    """Estimate EMU height for a table with given number of data rows."""
-    hdr = int(TABLE_HDR_H) if with_header else 0
-    return hdr + data_rows * int(TABLE_ROW_H)
-
-
-def _fits(current_y: int, needed_emu: int) -> bool:
-    """True if needed_emu fits between current_y and CONTENT_BOTTOM."""
-    return (current_y + needed_emu) <= int(CONTENT_BOTTOM)
-
-
-# ─── Continuation slide factory ───────────────────────────────────────────────
-
-def _new_continuation_slide(prs, content_src, breadcrumb, moduleNum, moduleName):
-    """
-    Clone a content slide, fill header fields, clear the body placeholder,
-    and return (slide, current_y).
+    Clone template, fill header tokens, REMOVE body placeholder.
+    All body content added as textboxes after this call.
     """
     slide = clone_slide(prs, content_src)
     fill_slide(slide, {
         "{{breadcrumb}}":  breadcrumb,
         "{{moduleNum}}":   moduleNum,
         "{{moduleName}}":  moduleName,
-        "{{moduleBody}}":  "",        # body placeholder cleared
+        "{{moduleBody}}":  "",
     })
-    # Normalise font on the (now-empty) placeholder to keep formatting consistent
-    _normalize_placeholder_font(slide, ph_idx=1, font_size=FONT_BODY)
-    # Remove body placeholder so free-form shapes have full room
-    _remove_placeholder_by_idx(slide, ph_idx=1)
-    return slide, int(CONTENT_TOP)
+    _remove_placeholder(slide, ph_idx=1)
+    return slide
 
 
-# ─── Text box writer ─────────────────────────────────────────────────────────
+# ─── Pagination helpers ───────────────────────────────────────────────────────
 
-def _add_text_box(slide, text: str, top_emu: int) -> int:
+def _paginate_lines(line_objects: list, max_lines: int) -> list:
     """
-    Add a text box whose line height matches the slide1 body placeholder.
-    Returns the new y position (bottom of the text box + TEXT_GAP).
+    Split line_objects into chunks that each fit within max_lines.
+    Returns list of chunks (each chunk = list of line dicts).
+    Never splits a list mid-item unnecessarily; never starts/ends on a blank.
+
+    FIX: Uses same CHARS_PER_LINE constant as _estimate_lines() for consistency.
     """
-    lines  = _estimate_text_lines(text)
-    # Height = lines * TEXT_LINE_H + small padding so the box never clips
-    height = int(lines * int(TEXT_LINE_H)) + int(Inches(0.08))
-
-    txBox = slide.shapes.add_textbox(
-        int(CONTENT_LEFT), top_emu,
-        int(CONTENT_WIDTH), height,
-    )
-    tf = txBox.text_frame
-    tf.word_wrap = True
-
-    # Set line spacing to exactly TEXT_LINE_H via XML so it matches slide1
-    # pptx line spacing in hundredths of a point (1pt = 100 units); fixed mode
-    try:
-        from pptx.oxml.ns import nsmap
-        txBody = tf._txBody
-        # Apply to the default paragraph-level spacing via bodyPr isn't enough;
-        # we set it on each paragraph's pPr instead
-    except Exception:
-        pass
-
-    lines_list = text.split("\n")
-    for i, line in enumerate(lines_list):
-        if i == 0:
-            para = tf.paragraphs[0]
-        else:
-            para = tf.add_paragraph()
-        run = para.add_run()
-        run.text = line
-        run.font.size  = FONT_BODY
-        run.font.color.rgb = TEXT_DARK
-        # Set fixed line spacing to match template placeholder (115% of 11pt)
-        try:
-            pPr = para._p.get_or_add_pPr()
-            lnSpc = etree.SubElement(pPr, qn("a:lnSpc"))
-            spcPts = etree.SubElement(lnSpc, qn("a:spcPts"))
-            # 115% of 11pt = 12.65pt; in hundredths-of-a-point = 1265
-            spcPts.set("val", "1265")
-        except Exception:
-            pass
-
-    return top_emu + height + int(TEXT_GAP)
-
-
-# ─── HTML-aware slide builder (fully rewritten) ───────────────────────────────
-
-def build_html_slide(prs, content_src,
-                     breadcrumb: str, moduleNum: str, moduleName: str,
-                     body_html: str) -> int:
-    """
-    Build one or more slides from an HTML description.
-    
-    Strategy
-    --------
-    1.  Parse HTML → list of {"type":"text"|"table", ...} blocks.
-    2.  The FIRST slide uses the template placeholder for the opening text
-        paragraph (up to MAX_LINES_PER_CONTENT lines).  This keeps the
-        header/breadcrumb styling intact.
-    3.  All further blocks are rendered with explicit text boxes / tables
-        on continuation slides, paginating automatically.
-    4.  A continuation slide is created whenever the next block (or chunk
-        of a block) would overflow the current_y position.
-    
-    Returns the number of slides created.
-    """
-    blocks = html_to_blocks(body_html)
-    log    = lambda *a: print(*a, file=sys.stderr, flush=True)
-    log(f"[build_html_slide] '{moduleName}' -> {len(blocks)} blocks")
-
-    # ── Step 1: separate intro text from the rest ────────────────────────────
-    # Collect leading text blocks → shown in the body placeholder on slide 1.
-    intro_lines = []
-    rest_blocks = []
-    found_non_text = False
-
-    for blk in blocks:
-        if blk["type"] != "text" or found_non_text:
-            found_non_text = True
-            rest_blocks.append(blk)
-        else:
-            intro_lines.append(blk["content"])
-
-    # Limit intro to what fits in the body placeholder (≈ MAX_LINES_PER_CONTENT lines)
-    intro_text   = "\n".join(intro_lines)
-    intro_chunks = _paginate_text(intro_text, MAX_LINES_PER_CONTENT)
-
-    # ── Step 2: first slide ──────────────────────────────────────────────────
-    slide1 = clone_slide(prs, content_src)
-    fill_slide(slide1, {
-        "{{breadcrumb}}":  breadcrumb,
-        "{{moduleNum}}":   moduleNum,
-        "{{moduleName}}":  moduleName,
-        "{{moduleBody}}":  intro_chunks[0] if intro_chunks else "",
-    })
-    # Normalise font size in body placeholder so it matches all other slides
-    _normalize_placeholder_font(slide1, ph_idx=1, font_size=FONT_BODY)
-    slides_created = 1
-
-    # Any overflow from the intro text becomes leading text blocks
-    overflow_intro = intro_chunks[1:]  # list of string chunks
-    extra_text_blocks = [{"type": "text", "content": c} for c in overflow_intro]
-
-    all_rest = extra_text_blocks + rest_blocks
-
-    if not all_rest:
-        log(f"[build_html_slide] -> 1 slide (no overflow)")
-        return slides_created
-
-    # ── Step 3: render remaining blocks with full pagination ─────────────────
-    # cur_slide starts as None — we create a continuation slide ONLY when the
-    # first block actually has content, preventing blank slides before tables.
-    cur_slide = None
-    cur_y     = int(CONTENT_TOP)
-
-    def _ensure_slide():
-        """Lazily create a continuation slide the first time content needs one."""
-        nonlocal cur_slide, cur_y, slides_created
-        if cur_slide is None:
-            cur_slide, cur_y = _new_continuation_slide(
-                prs, content_src, breadcrumb, moduleNum, moduleName
-            )
-            slides_created += 1
-
-    def _new_slide():
-        """Force a new continuation slide (overflow)."""
-        nonlocal cur_slide, cur_y, slides_created
-        cur_slide, cur_y = _new_continuation_slide(
-            prs, content_src, breadcrumb, moduleNum, moduleName
-        )
-        slides_created += 1
-
-    for blk in all_rest:
-        if blk["type"] == "text":
-            chunks = _paginate_text(blk["content"], MAX_LINES_PER_CONTENT)
-            for chunk in chunks:
-                if not chunk.strip():
-                    continue
-                needed = _text_block_height_emu(chunk)
-                _ensure_slide()
-                if not _fits(cur_y, needed):
-                    _new_slide()
-                    log(f"[build_html_slide] text overflow -> slide {slides_created}")
-                cur_y = _add_text_box(cur_slide, chunk, cur_y)
-
-        elif blk["type"] == "table":
-            rows = blk["rows"]
-            if not rows:
-                continue
-
-            header_row = rows[0]
-            data_rows  = rows[1:]
-
-            for chunk_data in _paginate_table_rows(data_rows, MAX_TABLE_ROWS_PER_SLIDE):
-                chunk_rows = [header_row] + chunk_data
-                # Every table chunk gets its own fresh slide so it starts at CONTENT_TOP
-                _new_slide()
-                log(f"[build_html_slide] table chunk -> slide {slides_created}")
-
-                bottom = _add_pptx_table(
-                    cur_slide, chunk_rows,
-                    left=int(TABLE_LEFT),
-                    top=cur_y,
-                    width=int(TABLE_W),
-                    first_row_is_header=True,
-                )
-                cur_y = bottom + int(TEXT_GAP)
-
-    log(f"[build_html_slide] -> {slides_created} slides total")
-    return slides_created
-
-
-def _paginate_text(text: str, max_lines: int) -> list:
-    """
-    Split text into chunks where each chunk has at most max_lines rendered lines.
-    Returns a list of non-empty strings. Returns [''] if text is empty.
-    Uses the same CHARS_PER_LINE as _estimate_text_lines so pagination is consistent.
-    """
-    if not text or not text.strip():
-        return [""]
-
-    CHARS_PER_LINE = 95
-    logical_lines = text.split("\n")
     chunks  = []
     current = []
-    current_line_count = 0
+    count   = 0
 
-    for line in logical_lines:
-        rendered = max(1, (len(line) + CHARS_PER_LINE - 1) // CHARS_PER_LINE)
-        if current_line_count + rendered > max_lines and current:
-            chunks.append("\n".join(current))
-            current = [line]
-            current_line_count = rendered
+    for ln in line_objects:
+        kind     = ln.get("kind", "normal")
+        is_blank = (kind == "blank" or not ln.get("text", "").strip())
+
+        if is_blank:
+            cost = 1
         else:
-            current.append(line)
-            current_line_count += rendered
+            depth_penalty = ln.get("depth", 0) * 8
+            effective     = max(80, CHARS_PER_LINE - depth_penalty)
+            cost = max(1, (len(ln.get("text", "")) + effective - 1) // effective)
 
+        if count + cost > max_lines and current:
+            # Trim trailing blanks before flush
+            while current and not current[-1].get("text", "").strip():
+                current.pop()
+            if current:
+                chunks.append(current)
+            current = []
+            count   = 0
+            if is_blank:
+                continue  # don't start new chunk with blank
+
+        current.append(ln)
+        count += cost
+
+    while current and not current[-1].get("text", "").strip():
+        current.pop()
     if current:
-        chunks.append("\n".join(current))
+        chunks.append(current)
 
-    return chunks if chunks else [""]
+    return chunks if chunks else [[]]
 
 
-def _paginate_table_rows(data_rows: list, max_rows: int) -> list:
-    """Yield lists of at most max_rows data rows."""
-    for i in range(0, max(len(data_rows), 1), max_rows):
+def _paginate_table_rows(data_rows: list, max_rows: int):
+    # FIX: if data_rows is empty yield nothing — avoids a blank slide
+    if not data_rows:
+        return
+    for i in range(0, len(data_rows), max_rows):
         chunk = data_rows[i:i + max_rows]
         if chunk:
             yield chunk
 
 
+# ─── HTML-aware slide builder ─────────────────────────────────────────────────
+
+def build_html_slide(prs, content_src,
+                     breadcrumb: str, moduleNum: str, moduleName: str,
+                     body_html: str) -> int:
+    """
+    Build one or more slides.  Body content ONLY via textboxes — consistent
+    spacing/indent on every slide regardless of template placeholder styles.
+    """
+    blocks = html_to_blocks(body_html)
+    log    = lambda *a: print(*a, file=sys.stderr, flush=True)
+    log(f"[build_html_slide] '{moduleName}' -> {len(blocks)} blocks")
+
+    # FIX: if there are no real content blocks, skip slide creation entirely
+    # (caller gets 0 back; no blank slide is inserted)
+    if not blocks:
+        log(f"[build_html_slide] '{moduleName}' -> no content blocks, skipping slide")
+        return 0
+
+    slides_created  = 0
+    cur_slide       = None
+    cur_y           = int(CONTENT_TOP)
+    slide_is_fresh  = False   # True immediately after a slide is created, False once content lands
+
+    def ensure_slide():
+        nonlocal cur_slide, cur_y, slides_created, slide_is_fresh
+        if cur_slide is None:
+            cur_slide      = _make_content_slide(
+                prs, content_src, breadcrumb, moduleNum, moduleName
+            )
+            cur_y          = int(CONTENT_TOP)
+            slides_created += 1
+            slide_is_fresh  = True
+
+    def new_slide():
+        nonlocal cur_slide, cur_y, slides_created, slide_is_fresh
+        cur_slide      = _make_content_slide(
+            prs, content_src, breadcrumb, moduleNum, moduleName
+        )
+        cur_y          = int(CONTENT_TOP)
+        slides_created += 1
+        slide_is_fresh  = True
+
+    def need_new_slide(needed_emu: int) -> bool:
+        """
+        Return True only if content genuinely does not fit AND the current
+        slide already has some content on it.  Never break to a new slide
+        when the slide was just created — that would leave it blank.
+        """
+        if slide_is_fresh:
+            return False          # slide is empty, content must go here
+        return not _fits(cur_y, needed_emu)
+
+    for blk in blocks:
+
+        if blk["type"] == "text":
+            line_chunks = _paginate_lines(blk["lines"], MAX_LINES_PER_SLIDE)
+            for chunk in line_chunks:
+                if not chunk:
+                    continue
+                needed = _lines_height_emu(chunk)
+                log(f"[build_html_slide] text chunk {len(chunk)} lines, "
+                    f"needed={needed/914400:.3f}in cur_y={cur_y/914400:.3f}in "
+                    f"bottom={int(CONTENT_BOTTOM)/914400:.3f}in fresh={slide_is_fresh}")
+                ensure_slide()
+                if need_new_slide(needed):
+                    new_slide()
+                    log(f"[build_html_slide] text overflow -> slide {slides_created}")
+                cur_y          = _write_lines_to_textbox(cur_slide, chunk, cur_y)
+                slide_is_fresh = False
+
+        elif blk["type"] == "table":
+            rows = blk["rows"]
+            if not rows:
+                continue
+            header_row = rows[0]
+            data_rows  = rows[1:]
+            # tables with no data rows still render the header row
+            if not data_rows:
+                data_rows = [[]]
+            for chunk_data in _paginate_table_rows(data_rows, MAX_TABLE_ROWS_PER_SLIDE):
+                chunk_rows = [header_row] + chunk_data
+                n_chunk    = len(chunk_rows)
+                tbl_h      = int(TABLE_HDR_H) + (n_chunk - 1) * int(TABLE_ROW_H)
+                log(f"[build_html_slide] table {n_chunk} rows, "
+                    f"tbl_h={tbl_h/914400:.3f}in cur_y={cur_y/914400:.3f}in "
+                    f"fresh={slide_is_fresh}")
+                ensure_slide()
+                if need_new_slide(tbl_h):
+                    new_slide()
+                    log(f"[build_html_slide] table overflow -> slide {slides_created}")
+                log(f"[build_html_slide] table -> slide {slides_created}")
+                bottom = _add_pptx_table(
+                    cur_slide, chunk_rows,
+                    left=int(TABLE_LEFT), top=cur_y,
+                    width=int(TABLE_W), first_row_is_header=True,
+                )
+                cur_y          = bottom + int(TEXT_GAP)
+                slide_is_fresh = False
+
+    log(f"[build_html_slide] -> {slides_created} slides total")
+    return max(slides_created, 1)
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    # Force UTF-8 on Windows where the default console codec is cp1252
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if hasattr(sys.stderr, "reconfigure"):
@@ -789,7 +785,6 @@ def main():
     prs        = Presentation(data["template"])
     n_template = len(prs.slides)
 
-    # Identify template slides by layout name
     cover_src = content_src = closing_src = None
     for slide in prs.slides:
         lname = slide.slide_layout.name
@@ -822,26 +817,31 @@ def main():
 
         elif layout == "LAYOUT_CONTENT":
             slide = clone_slide(prs, content_src)
+            ph = _get_placeholder(slide, ph_idx=1)
+            if ph:
+                ph.left   = int(CONTENT_LEFT)
+                ph.top    = int(CONTENT_TOP)
+                ph.width  = int(CONTENT_WIDTH)
+                ph.height = int(CONTENT_BOTTOM) - int(CONTENT_TOP)
             fill_slide(slide, fields)
-            # Fit body text inside the template placeholder; normalise font size
             _fit_text_in_body_placeholder(slide, ph_idx=1,
-                                          min_font=Pt(8), target_font=FONT_BODY)
+                                          min_font=Pt(7), target_font=FONT_BODY)
             generated += 1
 
         elif layout == "LAYOUT_HTML":
             breadcrumb = fields.get("{{breadcrumb}}", "")
-            moduleNum  = fields.get("{{moduleNum}}", "")
+            moduleNum  = fields.get("{{moduleNum}}",  "")
             moduleName = fields.get("{{moduleName}}", "")
-            body_html  = fields.get("__html__", "")
+            body_html  = fields.get("__html__",       "")
             n = build_html_slide(
                 prs, content_src,
                 breadcrumb, moduleNum, moduleName, body_html,
             )
-            generated += n
+            generated += n  # may be 0 if section had no renderable content
 
         elif layout == "LAYOUT_TABLE":
-            # Classic section table — split into multiple slides if rows overflow
-            text_fields = {k: v for k, v in fields.items() if not k.startswith("__")}
+            text_fields = {k: v for k, v in fields.items()
+                           if not k.startswith("__")}
             text_fields.setdefault("{{moduleNum}}",  "")
             text_fields.setdefault("{{moduleName}}", "")
             text_fields.setdefault("{{moduleBody}}", "")
@@ -850,22 +850,22 @@ def main():
             all_rows = fields.get("__tableRows__")    or []
 
             if not all_rows:
-                # No rows → still emit one slide
                 slide = clone_slide(prs, content_src)
                 fill_slide(slide, text_fields)
+                _remove_placeholder(slide, ph_idx=1)
                 generated += 1
             else:
-                # Paginate rows across slides
                 for chunk_idx, chunk in enumerate(
                     _paginate_table_rows(all_rows, MAX_TABLE_ROWS_PER_SLIDE)
                 ):
                     slide = clone_slide(prs, content_src)
-                    # Only show breadcrumb/section header on first chunk
                     chunk_fields = dict(text_fields)
                     if chunk_idx > 0:
-                        chunk_fields["{{breadcrumb}}"]  = text_fields.get("{{breadcrumb}}", "") + " (cont.)"
+                        chunk_fields["{{breadcrumb}}"] = (
+                            text_fields.get("{{breadcrumb}}", "") + " (cont.)"
+                        )
                     fill_slide(slide, chunk_fields)
-                    _remove_placeholder_by_idx(slide, ph_idx=1)
+                    _remove_placeholder(slide, ph_idx=1)
                     table_rows = ([headers] + chunk) if headers else chunk
                     _add_pptx_table(
                         slide, table_rows,
@@ -876,7 +876,6 @@ def main():
                     )
                     generated += 1
 
-    # Remove original template slides
     for i in range(n_template - 1, -1, -1):
         remove_slide(prs, i)
 

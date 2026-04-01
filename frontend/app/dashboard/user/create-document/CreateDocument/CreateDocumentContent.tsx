@@ -843,33 +843,58 @@ export default function CreateDocumentContent() {
 
   // ─── Preview ─────────────────────────────────────────────────────────────────
 
-  const handlePreview = async () => {
-    setPreviewLoading(true);
-    try {
-      const vars = { customerName, partnerName, documentName, opeId };
-      const payload = {
-        customerName, customerEmail: "", customerAddress: "", contractingParty, partnerName,
-        quoteId, documentTitle: documentName,
-        sowType: sowSize === "small" ? "SMALL" : sowSize === "proposal" ? "PROPOSAL" : "FULL",
-        status: "draft",
-        createdAtFormatted: formatDateOnly(new Date()),
-        sections: documentSections.map((s) => ({ id: s.id, title: replaceTags(s.title, vars), description: replaceTags(s.description || "", vars) })),
-        assigned: documentSections.reduce((acc, s) => {
-          acc[s.id] = s.modules.map((m) => ({ id: m.id, name: replaceTags(m.name, vars), description: replaceTags(m.description, vars), sectionId: s.id }));
-          return acc;
-        }, {}),
-      };
-      const response = await apiFetch(`/generate-document/${opeId}?type=pdf`, {
-        method: "POST", body: JSON.stringify(payload), headers: { "Content-Type": "application/json" }, responseType: "blob",
-      });
-      if (response?.size > 0) {
-        setPreviewPdfUrl(window.URL.createObjectURL(new Blob([response], { type: "application/pdf" })));
-        setShowPreview(true);
-      } else { showToast("Failed to generate PDF preview"); }
-    } catch { showToast("Failed to generate PDF preview"); }
-    setPreviewLoading(false);
-  };
+const handlePreview = async () => {
+  setPreviewLoading(true);
+  try {
+    const vars = { customerName, partnerName, documentName, opeId };
+    const isProposal = sowSize === "proposal";
 
+    const payload = {
+      customerName, customerEmail: "", customerAddress: "", contractingParty, partnerName,
+      quoteId, documentTitle: documentName,
+      sowType: sowSize === "small" ? "SMALL" : sowSize === "proposal" ? "PROPOSAL" : "FULL",
+      status: "draft",
+      createdAtFormatted: formatDateOnly(new Date()),
+      sections: documentSections.map((s) => ({
+        id: s.id,
+        title: replaceTags(s.title, vars),
+        description: replaceTags(s.description || "", vars),
+      })),
+      assigned: documentSections.reduce((acc, s) => {
+        acc[s.id] = s.modules.map((m) => ({
+          id: m.id,
+          name: replaceTags(m.name, vars),
+          description: replaceTags(m.description, vars),
+          sectionId: s.id,
+        }));
+        return acc;
+      }, {}),
+    };
+
+    // Proposal → generate PPTX then convert to PDF for preview
+    // DOCX/SoW → generate DOCX with TOC then convert to PDF for preview
+    const endpoint = isProposal
+      ? `/proposal/${opeId}?preview=true`
+      : `/generate-document/${opeId}?type=pdf&preview=true`;
+
+    const response = await apiFetch(endpoint, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+      responseType: "blob",
+    });
+
+    if (response?.size > 0) {
+      setPreviewPdfUrl(window.URL.createObjectURL(new Blob([response], { type: "application/pdf" })));
+      setShowPreview(true);
+    } else {
+      showToast("Failed to generate PDF preview");
+    }
+  } catch {
+    showToast("Failed to generate PDF preview");
+  }
+  setPreviewLoading(false);
+};
   // ─── Generate ────────────────────────────────────────────────────────────────
 
   const handleGenerate = async (type: string, status: "draft" | "final") => {

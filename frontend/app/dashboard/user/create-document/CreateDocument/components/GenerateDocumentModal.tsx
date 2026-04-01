@@ -128,14 +128,14 @@ export default function GenerateDocumentModal({
   const filteredDraftVersions = useMemo(() => {
     const norm = sowType.toUpperCase();
     return localDraftVersions.filter(
-      (d) => d.opeId === opeId && (d.sowType || "FULL").toUpperCase() === norm && (d.version || 0) > 0  // ✅ Only show generated versions
+      (d) => d.opeId === opeId && (d.sowType || "FULL").toUpperCase() === norm && (d.version || 0) > 0
     );
   }, [localDraftVersions, opeId, sowType]);
 
   const filteredFinalVersions = useMemo(() => {
     const norm = sowType.toUpperCase();
     return localFinalVersions.filter(
-      (f) => f.opeId === opeId && (f.sowType || "FULL").toUpperCase() === norm && (f.version || 0) > 0  // ✅ Only show generated versions
+      (f) => f.opeId === opeId && (f.sowType || "FULL").toUpperCase() === norm && (f.version || 0) > 0
     );
   }, [localFinalVersions, opeId, sowType]);
 
@@ -238,7 +238,15 @@ export default function GenerateDocumentModal({
       const dbVersion = await fetchVersionFromDb(versionObj.version, versionObj.status);
       const versionData = dbVersion.draft || dbVersion.final || versionObj;
       const payload = buildDocumentPayload(versionData);
-      const response = await apiFetch(`/generate-document/${opeId}?type=pdf`, {
+
+      // ✅ Proposal → convert PPTX to PDF via LibreOffice on the backend
+      // ✅ SoW/DOCX → update TOC via Word COM then convert to PDF via LibreOffice
+      const isProposal = sowType.toUpperCase() === "PROPOSAL";
+      const endpoint = isProposal
+        ? `/proposal/${opeId}?preview=true`
+        : `/generate-document/${opeId}?type=pdf&preview=true`;
+
+      const response = await apiFetch(endpoint, {
         method: "POST", body: JSON.stringify(payload),
         headers: { "Content-Type": "application/json" }, responseType: "blob",
       });
@@ -340,34 +348,30 @@ export default function GenerateDocumentModal({
               body: emailBody,
               fileType,
             });
-if (result?.success) {
-  const method = result.method || "unknown";
-  let message: string;
- 
-  if (method === "outlook-com") {
-    // Outlook compose window opened with file already attached
-    message = `✅ Outlook opened — ${finalFileName} is attached and ready to send.`;
-  } else if (method === "mailto") {
-    // Default mail client opened; file revealed in Explorer/Finder
-    message = `📬 Mail client opened. Attach the file from your Downloads folder: ${finalFileName}`;
-  } else {
-    message = `📎 Document saved to Downloads: ${finalFileName}`;
-  }
- 
-  showToast(message, "success");
-  setShowEmailModal(false);
-  setSelectedTo([]);
-  setCcInput("");
-  setToInput("");
-  setSelectedCc([]);
-  return;
-} else {
+            if (result?.success) {
+              const method = result.method || "unknown";
+              let message: string;
+
+              if (method === "outlook-com") {
+                message = `✅ Outlook opened — ${finalFileName} is attached and ready to send.`;
+              } else if (method === "mailto") {
+                message = `📬 Mail client opened. Attach the file from your Downloads folder: ${finalFileName}`;
+              } else {
+                message = `📎 Document saved to Downloads: ${finalFileName}`;
+              }
+
+              showToast(message, "success");
+              setShowEmailModal(false);
+              setSelectedTo([]);
+              setCcInput("");
+              setToInput("");
+              setSelectedCc([]);
+              return;
+            } else {
               console.warn("sendEmailWithAttachment failed:", result?.error);
-              // Fall back to browser download
             }
           } catch (ipcErr) {
             console.warn("IPC sendEmailWithAttachment error:", ipcErr);
-            // Fall back to browser download
           }
         }
 
