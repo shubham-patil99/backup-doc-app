@@ -48,7 +48,63 @@ finally {
 `;
 
 // ---------------------------------------------------------------------------
-// PDF SCRIPT
+// COMBINED TOC + PDF SCRIPT (single PowerShell process)
+// ✅ CRITICAL: Keeps Word COM object alive throughout both operations
+// This prevents RPC_E_DISCONNECTED on slower PCs due to COM object lifecycle
+// ---------------------------------------------------------------------------
+const COMBINED_TOC_AND_PDF_SCRIPT = `
+param(
+  [Parameter(Mandatory=$true)][string]$DocPath,
+  [Parameter(Mandatory=$true)][string]$PdfPath
+)
+
+$DocPath = [System.IO.Path]::GetFullPath($DocPath)
+$PdfPath = [System.IO.Path]::GetFullPath($PdfPath)
+if (-not (Test-Path $DocPath)) { Write-Error "File not found: $DocPath"; exit 1 }
+
+$word = $null
+$doc  = $null
+try {
+  # Create ONE Word COM object for entire pipeline
+  $word = New-Object -ComObject Word.Application
+  $word.Visible = $false
+  $word.DisplayAlerts = 0
+
+  # Open document once
+  $doc = $word.Documents.Open($DocPath)
+
+  # Step 1: Update TOC
+  $doc.Fields.Update() | Out-Null
+  foreach ($toc in $doc.TablesOfContents) { $toc.Update() }
+
+  # Step 2: Update page numbers in TOC
+  $doc.Fields.Update() | Out-Null
+  foreach ($toc in $doc.TablesOfContents) { $toc.UpdatePageNumbers() }
+
+  # Step 3: Save DOCX with updated TOC
+  $doc.Save()
+
+  # Step 4: Export to PDF (all within same COM object)
+  $doc.ExportAsFixedFormat($PdfPath, 17)
+
+  # Close and cleanup
+  $doc.Close([ref]$false)
+
+  Write-Output "COMBINED_OK: TOC and PDF completed successfully"
+  exit 0
+}
+catch {
+  Write-Error "Combined TOC + PDF failed: $_"
+  exit 1
+}
+finally {
+  if ($doc)  { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($doc) | Out-Null } catch {} }
+  if ($word) { try { $word.Quit(); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null } catch {} }
+}
+`;
+
+// ---------------------------------------------------------------------------
+// PDF SCRIPT (kept for backward compatibility)
 // ---------------------------------------------------------------------------
 const PDF_SCRIPT = `
 param(
@@ -181,11 +237,17 @@ function generateTOCAndExportPDF(docPath) {
 }
 
 // ---------------------------------------------------------------------------
-// ✅ NEW: Complete pipeline for DOCX → TOC update → PDF conversion
+// ✅ FIXED: Complete pipeline for DOCX → TOC update → PDF conversion
+// ✅ Uses SINGLE PowerShell process to maintain Word COM object lifetime
+// This prevents RPC_E_DISCONNECTED on slower PCs
 // ---------------------------------------------------------------------------
 /**
- * Process base64 DOCX: Save → Update TOC → Convert to PDF
+ * Process base64 DOCX: Save → Update TOC → Convert to PDF (all in ONE PowerShell process)
  * Returns both file paths in Downloads folder
+ *
+ * ⚠️ CRITICAL: The combined script keeps the Word COM object alive throughout,
+ * preventing COM object disconnection that occurs when using separate PowerShell processes
+ * on slower machines (timing gap allows COM object to timeout between processes).
  */
 function processDOCXAndGeneratePDF(base64, fileName) {
   if (process.platform !== "win32") {
@@ -211,24 +273,19 @@ function processDOCXAndGeneratePDF(base64, fileName) {
     fs.writeFileSync(docxPath, buffer);
     console.log("[wordCom] ✅ DOCX saved to:", docxPath);
 
-    // Step 2: Update TOC in DOCX
-    const tocScriptPath = writeTempScript(TOC_SCRIPT, "toc");
-    return runPowerShell(tocScriptPath, ["-DocPath", docxPath])
-      .then(() => {
-        console.log("[wordCom] ✅ TOC updated successfully");
-
-        // Step 3: Convert updated DOCX to PDF
-        pdfPath = docxPath.replace(/\.docx$/i, ".pdf");
-        const pdfScriptPath = writeTempScript(PDF_SCRIPT, "pdf");
-        return runPowerShell(pdfScriptPath, [
-          "-DocPath",
-          docxPath,
-          "-PdfPath",
-          pdfPath,
-        ]);
-      })
-      .then(() => {
-        console.log("[wordCom] ✅ PDF generated:", pdfPath);
+    // Step 2 & 3: Update TOC AND convert to PDF in SINGLE PowerShell process
+    // ✅ This keeps Word COM object alive throughout both operations
+    pdfPath = docxPath.replace(/\.docx$/i, ".pdf");
+    const combinedScriptPath = writeTempScript(COMBINED_TOC_AND_PDF_SCRIPT, "combined");
+    
+    return runPowerShell(combinedScriptPath, [
+      "-DocPath",
+      docxPath,
+      "-PdfPath",
+      pdfPath,
+    ])
+      .then((output) => {
+        console.log("[wordCom] ✅ Combined pipeline complete:", output);
         return {
           success: true,
           docxPath,
@@ -239,10 +296,13 @@ function processDOCXAndGeneratePDF(base64, fileName) {
         };
       })
       .catch((err) => {
-        console.error("[wordCom] ❌ Pipeline error:", err.message);
+        console.error("[wordCom] ❌ Combined pipeline error:", err.message);
         // Cleanup partial files
         if (docxPath && fs.existsSync(docxPath)) {
           try { fs.unlinkSync(docxPath); } catch (_) {}
+        }
+        if (pdfPath && fs.existsSync(pdfPath)) {
+          try { fs.unlinkSync(pdfPath); } catch (_) {}
         }
         throw err;
       });
