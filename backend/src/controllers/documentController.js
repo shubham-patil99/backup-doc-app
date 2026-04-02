@@ -1,6 +1,5 @@
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
 const PizZip = require("pizzip");
 const Docxtemplater = require("docxtemplater");
 const {
@@ -436,9 +435,10 @@ const sanitizeFileName = (name) => name.replace(/[\/\\?%*:|"<>]/g, "_");
 exports.generateDocument = async (req, res) => {
   try {
     const { opeId } = req.params;
-    let type = (req.query.type || "docx").toLowerCase();
-
-    // ✅ Read isPreview BEFORE Electron override so preview PDFs are never blocked
+    
+    // ✅ Backend ALWAYS returns DOCX — Electron on Windows handles TOC updates & PDF conversion
+    // This keeps backend platform-agnostic (Ubuntu/Windows compatible)
+    const type = "docx";
     const isPreview = req.query.preview === "true";
     const sendEmail = req.query.send === "true";
 
@@ -447,11 +447,7 @@ exports.generateDocument = async (req, res) => {
       req.query?.client === "electron" ||
       req.headers?.["user-agent"]?.toLowerCase().includes("electron");
 
-    // Only force docx for real downloads from Electron — never for preview
-    if (isElectronClient && type === "pdf" && !isPreview) {
-      console.log("[INFO] Electron download -> docx (TOC updated client-side)");
-      type = "docx";
-    }
+    console.log("[generateDocument] Generating DOCX for", isElectronClient ? "Electron client" : "web client");
 
     const status = req.body.status || req.query.status || "draft";
     const docVersion =
@@ -723,159 +719,12 @@ exports.generateDocument = async (req, res) => {
       console.log(`📨 Email sent to ${recipients}`);
     };
 
-    // ── PDF via Word COM (PowerShell) — no LibreOffice needed ─────────────
-if (type === "pdf") {
-  const tempPdfDir = tempDir;
-  const tempPdfPath = tempDocxPath.replace(/\.docx$/, ".pdf");
-
-if (isPreview) {
-  const psScriptPath = tempDocxPath.replace(/\.docx$/, ".ps1");
-  const psScript = `
-$ErrorActionPreference = 'Stop'
-$word = New-Object -ComObject Word.Application
-$word.Visible = $false
-$word.DisplayAlerts = 0
-try {
-  $doc = $word.Documents.Open('${tempDocxPath.replace(/\\/g, "\\\\")}')
-  $doc.Fields.Update() | Out-Null
-  foreach ($toc in $doc.TablesOfContents) { $toc.Update(); $toc.UpdatePageNumbers() }
-  $doc.Save()
-  $doc.Close([ref]$false)
-} finally {
-  $word.Quit()
-  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null
-  [System.GC]::Collect()
-}
-Write-Output 'done'
-`.trim();
-
-  fs.writeFileSync(psScriptPath, psScript, "utf8");
-
-  // Step 1: Word COM updates TOC, Step 2: LibreOffice converts to PDF
-  exec(
-    `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${psScriptPath}"`,
-    { timeout: 90_000 },
-    (tocError, tocStdout, tocStderr) => {
-      try { fs.unlinkSync(psScriptPath); } catch (_) {}
-
-      if (tocError) {
-        console.warn("[Preview] Word COM TOC update failed, converting without TOC:", tocStderr || tocError.message);
-        // Continue anyway — still render PDF, just without updated TOC
-      } else {
-        console.log("[Preview] Word COM TOC updated successfully");
-      }
-
-      // Step 2: LibreOffice converts the (now TOC-updated) docx to PDF
-      const tempPdfPath = tempDocxPath.replace(/\.docx$/, ".pdf");
-
-      const sofficeCmds = [
-        `soffice --headless --convert-to pdf --outdir "${tempDir}" "${tempDocxPath}"`,
-        `soffice.exe --headless --convert-to pdf --outdir "${tempDir}" "${tempDocxPath}"`,
-        `"C:\\Program Files\\LibreOffice\\program\\soffice.exe" --headless --convert-to pdf --outdir "${tempDir}" "${tempDocxPath}"`,
-        `"C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe" --headless --convert-to pdf --outdir "${tempDir}" "${tempDocxPath}"`,
-      ];
-
-      const tryConvert = (cmds, attemptIndex = 0) => {
-        if (cmds.length === 0) {
-          try { fs.unlinkSync(tempDocxPath); } catch (_) {}
-          return res.status(500).json({
-            error: "LibreOffice not found for PDF preview.",
-            hint: "Download from https://www.libreoffice.org/download and add to PATH",
-            triedCommands: sofficeCmds,
-          });
-        }
-
-        const cmd = cmds[0];
-        console.log(`[LibreOffice] Attempt ${attemptIndex + 1}: ${cmd}`);
-
-        exec(cmd, { timeout: 60_000 }, (error, stdout, stderr) => {
-          console.log(`[LibreOffice] stdout: ${stdout}`);
-          console.log(`[LibreOffice] stderr: ${stderr}`);
-          console.log(`[LibreOffice] error: ${error?.message}`);
-          console.log(`[LibreOffice] PDF exists: ${fs.existsSync(tempPdfPath)}`);
-
-          if (error || !fs.existsSync(tempPdfPath)) {
-            console.warn(`[LibreOffice] Attempt ${attemptIndex + 1} failed, trying next...`);
-            return tryConvert(cmds.slice(1), attemptIndex + 1);
-          }
-
-          try {
-            const pdfBuffer = fs.readFileSync(tempPdfPath);
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader(
-              "Content-Disposition",
-              `inline; filename="${sanitizedFileName}_preview.pdf"`
-            );
-            res.send(pdfBuffer);
-          } finally {
-            try { fs.unlinkSync(tempDocxPath); } catch (_) {}
-            try { fs.unlinkSync(tempPdfPath); } catch (_) {}
-          }
-        });
-      };
-
-      tryConvert(sofficeCmds);
-    }
-  );
-  return;
-}
-
-  // ── Full download: use Word COM (PowerShell) — unchanged ──────────────
-  const psScriptPath = tempDocxPath.replace(/\.docx$/, ".ps1");
-  const psScript = `
-$ErrorActionPreference = 'Stop'
-$word = New-Object -ComObject Word.Application
-$word.Visible = $false
-$word.DisplayAlerts = 0
-try {
-  $doc = $word.Documents.Open('${tempDocxPath.replace(/\\/g, "\\\\")}')
-  $doc.Fields.Update() | Out-Null
-  foreach ($toc in $doc.TablesOfContents) { $toc.Update(); $toc.UpdatePageNumbers() }
-  $doc.ExportAsFixedFormat('${tempPdfPath.replace(/\\/g, "\\\\")}', 17)
-  $doc.Close([ref]$false)
-} finally {
-  $word.Quit()
-  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null
-  [System.GC]::Collect()
-}
-Write-Output 'done'
-`.trim();
-
-  fs.writeFileSync(psScriptPath, psScript, "utf8");
-
-  exec(
-    `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${psScriptPath}"`,
-    { timeout: 90_000 },
-    async (error, stdout, stderr) => {
-      try { fs.unlinkSync(psScriptPath); } catch (_) {}
-      if (error || !fs.existsSync(tempPdfPath)) {
-        console.error("[PDF] Word COM failed:", stderr || error?.message);
-        try { fs.unlinkSync(tempDocxPath); } catch (_) {}
-        return res.status(500).json({
-          error: "PDF conversion failed. Ensure Microsoft Word is installed.",
-          details: stderr || error?.message,
-        });
-      }
-      try {
-        if (sendEmail) {
-          await sendEmailWithAttachment(tempPdfPath, sanitizedFileName);
-          return res.json({ success: true, message: "Email sent successfully" });
-        }
-        const pdfBuffer = fs.readFileSync(tempPdfPath);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="${sanitizedFileName}.pdf"`
-        );
-        res.send(pdfBuffer);
-      } finally {
-        try { fs.unlinkSync(tempDocxPath); } catch (_) {}
-        try { fs.unlinkSync(tempPdfPath); } catch (_) {}
-      }
-    }
-  );
-  return;
-}
+    // ── DOCX only: Electron on Windows handles TOC updates & PDF conversion ──
+    // Backend returns DOCX; Electron will:
+    //   1. Save to Downloads
+    //   2. Update TOC via Word COM
+    //   3. Convert to PDF if needed
+    console.log("[generateDocument] DOCX ready, Electron will handle TOC/PDF");
 
     // ── DOCX branch ────────────────────────────────────────────────────────
     try {

@@ -723,6 +723,44 @@ exports.deleteAllVersionsForOpe = async (req, res) => {
   }
 };
 
+// ✅ Delete all versions for a specific OPE + SoW type
+exports.deleteAllVersionsForOpeAndSowType = async (req, res) => {
+  try {
+    const { opeId, sowType } = req.params;
+
+    if (!opeId || !sowType) {
+      return res.status(400).json({
+        success: false,
+        error: "OPE ID and SoW type are required",
+      });
+    }
+
+    console.log(`🗑️ Deleting all versions for OPE: ${opeId}, sowType: ${sowType}`);
+
+    // Delete all drafts and finals for this OPE + sowType
+    const [draftCount, finalCount] = await Promise.all([
+      Draft.destroy({ where: { opeId, sowType } }),
+      Final.destroy({ where: { opeId, sowType } })
+    ]);
+
+    console.log(`✅ Deleted ${draftCount} draft(s) and ${finalCount} final(s) for OPE: ${opeId}, sowType: ${sowType}`);
+
+    return res.json({
+      success: true,
+      message: `Deleted ${draftCount} draft(s) and ${finalCount} final(s) for OPE: ${opeId}, sowType: ${sowType}`,
+      deletedDrafts: draftCount,
+      deletedFinals: finalCount
+    });
+  } catch (error) {
+    console.error("❌ Error deleting all versions for OPE + sowType:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete document versions",
+      details: error.message
+    });
+  }
+};
+
 exports.deleteDraftByOpe = async (req, res) => {
   try {
     const { opeId } = req.params;

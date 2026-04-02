@@ -98,6 +98,7 @@ export default function CreateDocumentContent() {
   // ── Modal state ──────────────────────────────────────────────────────────────
   const [showPreview, setShowPreview] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [previewFileType, setPreviewFileType] = useState<"pdf" | "docx" | "pptx">("pdf");
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -128,6 +129,8 @@ export default function CreateDocumentContent() {
   const pendingAutoActionRef = useRef<any>(null);
   const sowTypeChangeInProgressRef = useRef(false);
   const skipDraftReloadRef = useRef(false);
+  const initialDraftLoadedRef = useRef(false);
+  const dataFetchedAfterLoadRef = useRef(false);  // ✅ Prevent infinite fetch loop
 
   // ─── Computed lists filtered by docType ─────────────────────────────────────
 
@@ -145,12 +148,33 @@ export default function CreateDocumentContent() {
     [modules, sections, sowSize]
   );
 
+  // ✅ Recompute sections with synced modules for each sowType
+  // This ensures when sowSize changes, each section shows the correct modules
+  const visibleSectionsWithModules = React.useMemo(
+    () => visibleSections.map((section) => ({
+      ...section,
+      modules: visibleModules.filter((m) => m.sectionId === section.id),
+    })),
+    [visibleSections, visibleModules]
+  );
+
   // ─── Helpers ────────────────────────────────────────────────────────────────
 
   const showToast = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(null), 2000);
   };
+
+  const isElectronEnv = (): boolean =>
+    typeof window !== "undefined" && !!(window as any).electronAPI?.isElectron;
+
+  const blobToBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = () => reject(new Error("FileReader failed"));
+      reader.readAsDataURL(blob);
+    });
 
   const formatDateOnly = (date = new Date()) => {
     const d = new Date(date);
@@ -358,7 +382,12 @@ export default function CreateDocumentContent() {
   }, []);
 
   /** Fetch sections/modules on mount and when sowSize changes */
-  useEffect(() => { fetchData(); }, [sowSize]);
+  /** But SKIP the initial call on first mount - wait for draft to load to get the actual sowType */
+  useEffect(() => {
+    if (!initialDraftLoadedRef.current) return;  // ✅ Skip initial call until draft is loaded
+    dataFetchedAfterLoadRef.current = false;  // ✅ Allow data fetch after sowSize changes
+    fetchData();
+  }, [sowSize]);
 
   /** Load draft when opeId or modules change (skip during sow-type switch) */
   useEffect(() => {
@@ -420,11 +449,23 @@ export default function CreateDocumentContent() {
             localStorage.removeItem("pendingDraft");
           } catch (err) { console.warn("Failed to flush pendingDraft:", err); }
         }
+        
+        // ✅ Mark initial draft load as complete 
+        initialDraftLoadedRef.current = true;
+        
+        // ✅ If this is the initial load and sowSize won't change, fetch data now
+        const fetchSowType =
+          source?.sowType === "SMALL" ? "small" : source?.sowType === "PROPOSAL" ? "proposal" : "full";
+        if (!dataFetchedAfterLoadRef.current) {
+          dataFetchedAfterLoadRef.current = true;
+          // Schedule fetch after state updates complete
+          setTimeout(() => fetchData(fetchSowType), 0);
+        }
       } catch (err) { console.warn("Failed to load draft:", opeId, err); }
       finally { setLoading(false); }
     };
     loadDraftForOpe();
-  }, [opeId, modules]);  // ✅ Removed sowSize - we load the actual saved sowType from database
+  }, [opeId]);  // ✅ Removed modules - prevents infinite loop
 
   /** Auto-format document name when opeId / customerName / contractingParty changes */
   useEffect(() => {
@@ -536,6 +577,9 @@ export default function CreateDocumentContent() {
         apiFetch(`/sections/all?docType=${docType}`),
         apiFetch("/modules"),
       ]);
+      
+      console.log(`[fetchData] docType=${docType}, sections returned:`, sectionsRes?.length || 0, "modules returned:", modulesRes?.length || 0);
+      
       const normalizedModules = (modulesRes || []).map((m) => ({
         ...m,
         sectionId: m.sectionId || m.section_id,
@@ -545,9 +589,18 @@ export default function CreateDocumentContent() {
       const normalizedSections = (sectionsRes || [])
         .map((s, idx) => {
           const p = Number(s.position ?? s.sortOrder);
-          return { ...s, position: Number.isFinite(p) ? p : idx, modules: normalizedModules.filter((m) => m.sectionId === s.id) };
+          // ✅ Explicitly ensure docType is set (fallback to docType from query if missing)
+          return { 
+            ...s, 
+            docType: s.docType || docType,  // Fallback to query param if field is missing
+            position: Number.isFinite(p) ? p : idx, 
+            modules: normalizedModules.filter((m) => m.sectionId === s.id) 
+          };
         })
         .sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER));
+      
+      console.log(`[fetchData] normalized ${normalizedSections.length} sections`, normalizedSections);
+      
       setSections(normalizedSections);
       setModules(normalizedModules);
     } catch {
@@ -566,7 +619,13 @@ export default function CreateDocumentContent() {
       const normalizedSections = (sectionsRes || [])
         .map((s, idx) => {
           const p = Number(s.position);
-          return { ...s, position: Number.isFinite(p) ? p : idx, modules: normalizedModules.filter((m) => m.sectionId === s.id) };
+          // ✅ Explicitly ensure docType is set (fallback to docType from query if missing)
+          return { 
+            ...s, 
+            docType: s.docType || docType,  // Fallback to query param if field is missing
+            position: Number.isFinite(p) ? p : idx, 
+            modules: normalizedModules.filter((m) => m.sectionId === s.id) 
+          };
         })
         .sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER));
       setSections(normalizedSections);
@@ -727,20 +786,35 @@ export default function CreateDocumentContent() {
   const confirmSowTypeChange = async () => {
     if (!pendingSowType) return;
     const newType = pendingSowType;
-    sowTypeChangeInProgressRef.current = true;
-    skipDraftReloadRef.current = true;
-    setShowSowTypeWarning(false);
-    setPendingSowType(null);
-    setSowSize(newType);
-    setDocumentSections([]);
-    setSections([]);
-    setModules([]);
+    const oldSowType = sowSize.toUpperCase();
+    
     try {
+      // Delete all records for old SoW type to start fresh
+      const deleteRes = await apiFetch(`/drafts/delete-all/${opeId}/${oldSowType}`, {
+        method: "DELETE"
+      });
+      
+      if (!deleteRes.success) {
+        showToast("Failed to clear previous SoW data");
+        return;
+      }
+      
+      sowTypeChangeInProgressRef.current = true;
+      skipDraftReloadRef.current = true;
+      setShowSowTypeWarning(false);
+      setPendingSowType(null);
+      setSowSize(newType);
+      setDocumentSections([]);
+      setSections([]);
+      setModules([]);
+      
       await autoSaveDraft([], newType);
       await refreshSourceLists(newType);
       showToast(`Switched to ${newType === "full" ? "Full" : newType === "small" ? "Short" : "Proposal"} SoW`);
     } catch (err) {
       console.warn("Failed to save sow change:", err);
+      showToast("Error switching SoW types");
+      return;
     } finally {
       sowTypeChangeInProgressRef.current = false;
     }
@@ -845,6 +919,7 @@ export default function CreateDocumentContent() {
 
 const handlePreview = async () => {
   setPreviewLoading(true);
+  setPreviewFileType("pdf"); // default
   try {
     const vars = { customerName, partnerName, documentName, opeId };
     const isProposal = sowSize === "proposal";
@@ -871,27 +946,102 @@ const handlePreview = async () => {
       }, {}),
     };
 
-    // Proposal → generate PPTX then convert to PDF for preview
-    // DOCX/SoW → generate DOCX with TOC then convert to PDF for preview
-    const endpoint = isProposal
-      ? `/proposal/${opeId}?preview=true`
-      : `/generate-document/${opeId}?type=pdf&preview=true`;
-
-    const response = await apiFetch(endpoint, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      headers: { "Content-Type": "application/json" },
-      responseType: "blob",
-    });
-
-    if (response?.size > 0) {
-      setPreviewPdfUrl(window.URL.createObjectURL(new Blob([response], { type: "application/pdf" })));
-      setShowPreview(true);
+    if (isProposal) {
+      // Proposal → backend converts PPTX to PDF for preview (when ?preview=true)
+      const endpoint = `/proposal/${opeId}?preview=true`;
+      try {
+        const response = await apiFetch(endpoint, {
+          method: "POST",
+          body: JSON.stringify(payload),
+          headers: { "Content-Type": "application/json" },
+          responseType: "blob",
+        });
+        
+        if (!response || response.size === 0) {
+          console.warn("handlePreview: Empty or null proposal response from endpoint");
+          showToast("Failed to generate proposal preview - empty response");
+          return;
+        }
+        
+        try {
+          // Backend returns PDF for ?preview=true
+          const pdfUrl = window.URL.createObjectURL(
+            new Blob([response], { type: "application/pdf" })
+          );
+          setPreviewFileType("pdf");
+          setPreviewPdfUrl(pdfUrl);
+          setShowPreview(true);
+        } catch (blobErr) {
+          console.error("Failed to create PDF blob URL:", blobErr);
+          showToast("Failed to create proposal preview URL");
+        }
+      } catch (fetchErr) {
+        console.error("Failed to fetch proposal preview:", fetchErr);
+        showToast("Failed to fetch proposal preview");
+      }
     } else {
-      showToast("Failed to generate PDF preview");
+      // SoW/DOCX → backend returns DOCX, convert to PDF with TOC on Electron
+      const endpoint = `/generate-document/${opeId}?type=docx&preview=true`;
+      const response = await apiFetch(endpoint, {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+        responseType: "blob",
+      });
+
+      if (response && response.size > 0) {
+        // ✅ Electron: convert DOCX → PDF with TOC for preview
+        if (isElectronEnv() && (window as any).electronAPI?.processDOCXAndGeneratePDF) {
+          try {
+            const base64 = await blobToBase64(response);
+            const fileName = `preview_${Date.now()}.docx`;
+            const result = await (window as any).electronAPI.processDOCXAndGeneratePDF({
+              base64,
+              fileName,
+            });
+
+            if (result?.success && result.pdfPath) {
+              const fileUrl = `file:///${result.pdfPath.replace(/\\/g, "/")}`;
+              setPreviewFileType("pdf");
+              setPreviewPdfUrl(fileUrl);
+              setShowPreview(true);
+            } else {
+              // Fallback: display DOCX as blob if conversion fails
+              const docxUrl = window.URL.createObjectURL(
+                new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
+              );
+              setPreviewFileType("docx");
+              setPreviewPdfUrl(docxUrl);
+              setShowPreview(true);
+              showToast("Preview: Showing DOCX (TOC conversion failed)");
+            }
+          } catch (electronErr) {
+            // Fallback: display DOCX as blob if Electron API fails
+            console.warn("Electron API error:", electronErr);
+            const docxUrl = window.URL.createObjectURL(
+              new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
+            );
+            setPreviewFileType("docx");
+            setPreviewPdfUrl(docxUrl);
+            setShowPreview(true);
+            showToast("Preview: Showing DOCX (Electron unavailable)");
+          }
+        } else {
+          // Non-Electron or API not available: display DOCX as blob
+          const docxUrl = window.URL.createObjectURL(
+            new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
+          );
+          setPreviewFileType("docx");
+          setPreviewPdfUrl(docxUrl);
+          setShowPreview(true);
+        }
+      } else {
+        showToast("Failed to generate preview");
+      }
     }
-  } catch {
-    showToast("Failed to generate PDF preview");
+  } catch (error) {
+    console.error("Preview error:", error);
+    showToast("Failed to generate preview");
   }
   setPreviewLoading(false);
 };
@@ -1355,7 +1505,7 @@ const handlePreview = async () => {
             </div>
             <div className="space-y-2">
               <AvailableSection
-                sections={visibleSections.map((section) => ({
+                sections={visibleSectionsWithModules.map((section) => ({
                   ...section,
                   title: stripHtmlLocal(section.title) || stripHtmlLocal(section.description || "").split("\n")[0],
                 }))}
@@ -1517,6 +1667,7 @@ const handlePreview = async () => {
       <DocxPreviewModal
         isOpen={showPreview} onClose={() => setShowPreview(false)}
         payload={previewPayload} opeId={opeId} showToast={showToast} pdfUrl={previewPdfUrl}
+        fileType={previewFileType}
       />
 
       <SowTypeWarningModal

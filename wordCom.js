@@ -180,7 +180,80 @@ function generateTOCAndExportPDF(docPath) {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// ✅ NEW: Complete pipeline for DOCX → TOC update → PDF conversion
+// ---------------------------------------------------------------------------
+/**
+ * Process base64 DOCX: Save → Update TOC → Convert to PDF
+ * Returns both file paths in Downloads folder
+ */
+function processDOCXAndGeneratePDF(base64, fileName) {
+  if (process.platform !== "win32") {
+    return Promise.reject(new Error("Windows only"));
+  }
+
+  if (!fileName || !fileName.endsWith(".docx")) {
+    return Promise.reject(new Error("fileName must end with .docx"));
+  }
+
+  let docxPath = null;
+  let pdfPath = null;
+
+  try {
+    // Step 1: Save DOCX to Downloads
+    const downloadsDir = path.join(os.homedir(), "Downloads");
+    if (!fs.existsSync(downloadsDir)) {
+      fs.mkdirSync(downloadsDir, { recursive: true });
+    }
+
+    docxPath = path.join(downloadsDir, fileName);
+    const buffer = Buffer.from(base64, "base64");
+    fs.writeFileSync(docxPath, buffer);
+    console.log("[wordCom] ✅ DOCX saved to:", docxPath);
+
+    // Step 2: Update TOC in DOCX
+    const tocScriptPath = writeTempScript(TOC_SCRIPT, "toc");
+    return runPowerShell(tocScriptPath, ["-DocPath", docxPath])
+      .then(() => {
+        console.log("[wordCom] ✅ TOC updated successfully");
+
+        // Step 3: Convert updated DOCX to PDF
+        pdfPath = docxPath.replace(/\.docx$/i, ".pdf");
+        const pdfScriptPath = writeTempScript(PDF_SCRIPT, "pdf");
+        return runPowerShell(pdfScriptPath, [
+          "-DocPath",
+          docxPath,
+          "-PdfPath",
+          pdfPath,
+        ]);
+      })
+      .then(() => {
+        console.log("[wordCom] ✅ PDF generated:", pdfPath);
+        return {
+          success: true,
+          docxPath,
+          pdfPath,
+          docxFileName: fileName,
+          pdfFileName: fileName.replace(/\.docx$/i, ".pdf"),
+          downloadDir: downloadsDir,
+        };
+      })
+      .catch((err) => {
+        console.error("[wordCom] ❌ Pipeline error:", err.message);
+        // Cleanup partial files
+        if (docxPath && fs.existsSync(docxPath)) {
+          try { fs.unlinkSync(docxPath); } catch (_) {}
+        }
+        throw err;
+      });
+  } catch (err) {
+    console.error("[wordCom] ❌ Save/initialization error:", err.message);
+    return Promise.reject(err);
+  }
+}
+
 module.exports = {
   generateTOC,
   generateTOCAndExportPDF,
+  processDOCXAndGeneratePDF,
 };

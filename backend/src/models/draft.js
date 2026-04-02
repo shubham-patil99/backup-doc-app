@@ -48,8 +48,7 @@ const Draft = sequelize.define("Draft", {
   sowType: {
     type: DataTypes.STRING,
     allowNull: true,
-    field: "sow_type",
-    defaultValue: "FULL",       // FULL or SMALL
+    field: "sow_type",    // FULL or SMALL
   },
 
   content: {

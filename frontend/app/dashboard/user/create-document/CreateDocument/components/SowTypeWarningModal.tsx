@@ -23,12 +23,17 @@ export default function SowTypeWarningModal({
         <h3 className="text-lg font-bold mb-4 text-gray-900">
           Change SoW Type?
         </h3>
-        <p className="mb-4 text-gray-600">
+        <p className="mb-4 text-gray-700">
           Switching from <span className="font-semibold">{fromType === 'full' ? 'Full SoW' : fromType === 'proposal' ? 'Proposal' : 'Short SoW'}</span> to{' '}
-          <span className="font-semibold">{toType === 'full' ? 'Full SoW' : toType === 'proposal' ? 'Proposal' : 'Short SoW'}</span> will reset your document builder and save the current state.
+          <span className="font-semibold">{toType === 'full' ? 'Full SoW' : toType === 'proposal' ? 'Proposal' : 'Short SoW'}</span> will:
         </p>
-        <p className="mb-6 text-sm text-amber-600 font-medium">
-          ⚠️ All sections and modules in the document builder will be cleared.
+        <ul className="mb-6 text-sm text-gray-700 space-y-2 ml-4">
+          <li>✓ Delete <strong>all saved versions</strong> (drafts and finals) for the current {fromType === 'full' ? 'Full SoW' : fromType === 'proposal' ? 'Proposal' : 'Short SoW'} from the database</li>
+          <li>✓ Clear the document builder completely</li>
+          <li>✓ Start fresh with a blank {toType === 'full' ? 'Full SoW' : toType === 'proposal' ? 'Proposal' : 'Short SoW'}</li>
+        </ul>
+        <p className="mb-6 text-sm text-red-600 font-semibold">
+          ⚠️ This action cannot be undone. All {fromType === 'full' ? 'Full SoW' : fromType === 'proposal' ? 'Proposal' : 'Short SoW'} records for this OPE will be permanently deleted.
         </p>
         <div className="flex gap-3 justify-end">
           <button
@@ -39,9 +44,9 @@ export default function SowTypeWarningModal({
           </button>
           <button
             onClick={onConfirm}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
           >
-            Continue
+            Yes, Delete & Switch
           </button>
         </div>
       </div>

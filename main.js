@@ -9,7 +9,7 @@ const os = require("os");
 const net = require("net");
 const http = require("http");
 const { exec } = require("child_process");
-const { generateTOC, generateTOCAndExportPDF } = require("./wordCom");
+const { generateTOC, generateTOCAndExportPDF, processDOCXAndGeneratePDF } = require("./wordCom");
 
 // ── Built-in MIME types ─────────────────────────────────────────────────────
 const MIME = {
@@ -206,6 +206,23 @@ ipcMain.handle("save-docx-toc", async (_event, { base64, fileName }) => {
   } catch (err) {
     console.error("[main] save-docx-toc error:", err.message);
     return { success: false, filePath, error: err.message };
+  }
+});
+
+// ── IPC: process-docx-pdf ──────────────────────────────────────────────────
+// ✅ NEW: Complete pipeline: save DOCX → update TOC → convert to PDF
+ipcMain.handle("process-docx-pdf", async (_event, { base64, fileName }) => {
+  try {
+    const result = await processDOCXAndGeneratePDF(base64, fileName);
+    return result; // Returns { success, docxPath, pdfPath, docxFileName, pdfFileName, downloadDir }
+  } catch (err) {
+    console.error("[main] process-docx-pdf error:", err.message);
+    return {
+      success: false,
+      error: err.message,
+      docxPath: null,
+      pdfPath: null,
+    };
   }
 });
 

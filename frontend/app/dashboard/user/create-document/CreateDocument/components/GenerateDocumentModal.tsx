@@ -42,6 +42,7 @@ export default function GenerateDocumentModal({
   const [selectedStatus, setSelectedStatus] = useState<"draft" | "final">("draft");
   const [showPreview, setShowPreview] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [previewFileType, setPreviewFileType] = useState<"pdf" | "docx" | "pptx">("pdf");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
@@ -239,25 +240,97 @@ export default function GenerateDocumentModal({
       const versionData = dbVersion.draft || dbVersion.final || versionObj;
       const payload = buildDocumentPayload(versionData);
 
-      // ✅ Proposal → convert PPTX to PDF via LibreOffice on the backend
-      // ✅ SoW/DOCX → update TOC via Word COM then convert to PDF via LibreOffice
+      // ✅ Backend always returns DOCX now (Electron on Windows handles TOC/PDF)
+      // For preview: fetch document and process appropriately
       const isProposal = sowType.toUpperCase() === "PROPOSAL";
-      const endpoint = isProposal
-        ? `/proposal/${opeId}?preview=true`
-        : `/generate-document/${opeId}?type=pdf&preview=true`;
-
-      const response = await apiFetch(endpoint, {
-        method: "POST", body: JSON.stringify(payload),
-        headers: { "Content-Type": "application/json" }, responseType: "blob",
-      });
-      if (response?.size > 0)
-        setPreviewPdfUrl(window.URL.createObjectURL(new Blob([response], { type: "application/pdf" })));
+      
+      if (isProposal) {
+        // Proposal → backend converts PPTX to PDF for preview (when ?preview=true)
+        const endpoint = `/proposal/${opeId}?preview=true`;
+        try {
+          const response = await apiFetch(endpoint, {
+            method: "POST", body: JSON.stringify(payload),
+            headers: { "Content-Type": "application/json" }, responseType: "blob",
+          });
+          
+          if (!response || response.size === 0) {
+            console.warn("handlePreviewVersion: Empty or null proposal response from endpoint");
+            showToast("Failed to generate proposal preview - empty response", "error");
+            return;
+          }
+          
+          try {
+            // Backend returns PDF for ?preview=true
+            const pdfUrl = window.URL.createObjectURL(new Blob([response], { type: "application/pdf" }));
+            setPreviewFileType("pdf");
+            setPreviewPdfUrl(pdfUrl);
+            setShowPreview(true);
+          } catch (blobErr) {
+            console.error("Failed to create PDF blob URL:", blobErr);
+            showToast("Failed to create proposal preview URL", "error");
+          }
+        } catch (fetchErr) {
+          console.error("Failed to fetch proposal preview:", fetchErr);
+          showToast("Failed to fetch proposal preview", "error");
+        }
+      } else {
+        // SoW/DOCX → backend returns DOCX
+        const endpoint = `/generate-document/${opeId}?type=docx&preview=true`;
+        const response = await apiFetch(endpoint, {
+          method: "POST", body: JSON.stringify(payload),
+          headers: { "Content-Type": "application/json" }, responseType: "blob",
+        });
+        
+        if (response && response.size > 0) {
+          // ✅ Electron: convert DOCX → PDF with TOC for preview
+          if (isElectronEnv() && (window as any).electronAPI?.processDOCXAndGeneratePDF) {
+            try {
+              const base64 = await blobToBase64(response);
+              const fileName = `preview_${Date.now()}.docx`;
+              const result = await (window as any).electronAPI.processDOCXAndGeneratePDF({
+                base64,
+                fileName,
+              });
+              
+              if (result?.success && result.pdfPath) {
+                // Load PDF from file system using file:// protocol
+                const fileUrl = `file:///${result.pdfPath.replace(/\\/g, "/")}`;
+                setPreviewFileType("pdf");
+                setPreviewPdfUrl(fileUrl);
+                setShowPreview(true);
+              } else {
+                console.warn("processDOCXAndGeneratePDF failed:", result?.error);
+                // Fallback: display DOCX as blob
+                const docxUrl = window.URL.createObjectURL(new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+                setPreviewFileType("docx");
+                setPreviewPdfUrl(docxUrl);
+                setShowPreview(true);
+              }
+            } catch (electronErr) {
+              console.error("Electron PDF conversion failed:", electronErr);
+              // Fallback: display DOCX as blob
+              const docxUrl = window.URL.createObjectURL(new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+              setPreviewFileType("docx");
+              setPreviewPdfUrl(docxUrl);
+              setShowPreview(true);
+            }
+          } else {
+            // Non-Electron or API not available: display DOCX as blob
+            const docxUrl = window.URL.createObjectURL(new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+            setPreviewFileType("docx");
+            setPreviewPdfUrl(docxUrl);
+            setShowPreview(true);
+          }
+        } else {
+          console.warn("handlePreviewVersion: Empty or null DOCX response");
+          showToast("Failed to generate DOCX preview - empty response", "error");
+        }
+      }
     } catch (error) {
       console.error("Preview error:", error);
     } finally {
       setPreviewLoading(false);
     }
-    setShowPreview(true);
   };
 
   const handleDownloadVersion = async (versionObj: any, type: "docx" | "pdf" | "pptx") => {
@@ -328,74 +401,74 @@ export default function GenerateDocumentModal({
       const payload = buildDocumentPayload(versionData);
 
       const endpoint =
-        fileType === "pptx" ? `/proposal/${opeId}` : `/generate-document/${opeId}?type=${fileType}`;
-      const response = await apiFetch(endpoint, {
-        method: "POST", body: JSON.stringify(payload),
-        headers: { "Content-Type": "application/json" }, responseType: "blob",
-      });
+          fileType === "pptx" ? `/proposal/${opeId}` : `/generate-document/${opeId}?type=${fileType}`;
+        const response = await apiFetch(endpoint, {
+          method: "POST", body: JSON.stringify(payload),
+          headers: { "Content-Type": "application/json" }, responseType: "blob",
+        });
 
-      if (response?.size > 0) {
-        const finalFileName = ensureExtension(defaultFileName, fileType);
+        if (response?.size > 0) {
+          const finalFileName = ensureExtension(defaultFileName, fileType);
 
-        // ✅ Electron: auto-attach to email client with document
-        if (isElectronEnv()) {
-          try {
-            const base64 = await blobToBase64(response);
-            const result = await (window as any).electronAPI.sendEmailWithAttachment({
-              base64,
-              fileName: finalFileName,
-              subject,
-              body: emailBody,
-              fileType,
-            });
-            if (result?.success) {
-              const method = result.method || "unknown";
-              let message: string;
+          // ✅ Electron: auto-attach to email client with document
+          if (isElectronEnv()) {
+            try {
+              const base64 = await blobToBase64(response);
+              const result = await (window as any).electronAPI.sendEmailWithAttachment({
+                base64,
+                fileName: finalFileName,
+                subject,
+                body: emailBody,
+                fileType,
+              });
+              if (result?.success) {
+                const method = result.method || "unknown";
+                let message: string;
 
-              if (method === "outlook-com") {
-                message = `✅ Outlook opened — ${finalFileName} is attached and ready to send.`;
-              } else if (method === "mailto") {
-                message = `📬 Mail client opened. Attach the file from your Downloads folder: ${finalFileName}`;
+                if (method === "outlook-com") {
+                  message = `✅ Outlook opened — ${finalFileName} is attached and ready to send.`;
+                } else if (method === "mailto") {
+                  message = `📬 Mail client opened. Attach the file from your Downloads folder: ${finalFileName}`;
+                } else {
+                  message = `📎 Document saved to Downloads: ${finalFileName}`;
+                }
+
+                showToast(message, "success");
+                setShowEmailModal(false);
+                setSelectedTo([]);
+                setCcInput("");
+                setToInput("");
+                setSelectedCc([]);
+                return;
               } else {
-                message = `📎 Document saved to Downloads: ${finalFileName}`;
+                console.warn("sendEmailWithAttachment failed:", result?.error);
               }
-
-              showToast(message, "success");
-              setShowEmailModal(false);
-              setSelectedTo([]);
-              setCcInput("");
-              setToInput("");
-              setSelectedCc([]);
-              return;
-            } else {
-              console.warn("sendEmailWithAttachment failed:", result?.error);
+            } catch (ipcErr) {
+              console.warn("IPC sendEmailWithAttachment error:", ipcErr);
             }
-          } catch (ipcErr) {
-            console.warn("IPC sendEmailWithAttachment error:", ipcErr);
           }
+
+          // ✅ Web fallback: trigger browser download so user can manually attach
+          const url = window.URL.createObjectURL(response);
+          const a = document.createElement("a");
+          a.href = url; a.download = finalFileName;
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => window.URL.revokeObjectURL(url), 30_000);
+
+          // ✅ Open email modal for manual to/cc entry in web mode
+          setShowEmailModal(true);
+          setSelectedVersion(versionObj);
+        } else {
+          console.warn("openEmailModal: generated file blob empty");
+          showToast("Failed to generate document", "error");
         }
-
-        // ✅ Web fallback: trigger browser download so user can manually attach
-        const url = window.URL.createObjectURL(response);
-        const a = document.createElement("a");
-        a.href = url; a.download = finalFileName;
-        document.body.appendChild(a); a.click();
-        document.body.removeChild(a);
-        setTimeout(() => window.URL.revokeObjectURL(url), 30_000);
-
-        // ✅ Open email modal for manual to/cc entry in web mode
-        setShowEmailModal(true);
-        setSelectedVersion(versionObj);
-      } else {
-        console.warn("openEmailModal: generated file blob empty");
-        showToast("Failed to generate document", "error");
+      } catch (err) {
+        console.warn("openEmailModal: generation failed", err);
+        showToast("Error generating document", "error");
+      } finally {
+        setLoadingAction(null);
       }
-    } catch (err) {
-      console.warn("openEmailModal: generation failed", err);
-      showToast("Error generating document", "error");
-    } finally {
-      setLoadingAction(null);
-    }
   };
 
   const closeEmailModal = () => {
@@ -435,20 +508,35 @@ export default function GenerateDocumentModal({
         return;
       }
 
-      if (isElectron) {
-        const prep = await (window as any).electron.prepareDocument({
-          filePath: response.filePath, convertToPdf: wantClientPdf,
-        });
-        const attachmentPath = prep?.convertedFilePath || response.filePath;
-        const emailResult = await (window as any).electron.sendEmail({
-          filePath: attachmentPath,
-          to: response.recipients || selectedTo.join(","),
-          cc: response.cc || selectedCc.join(","),
-          subject: response.subject || `Document Version ${selectedVersion.version}`,
-          body: response.body || `Please find attached the document.\n\nBest regards,\n${userNameDb}`,
-        });
-        if (!emailResult.success) throw new Error(emailResult.error || "Failed to open email client");
-        showToast("✅ Email client opened with document attached!", "success");
+      if (isElectron && response.fileData) {
+        // ✅ Use the correct Electron API from preload.js
+        try {
+          if (wantClientPdf && (window as any).electronAPI?.processDOCXAndGeneratePDF) {
+            // Send DOCX to Electron to update TOC and generate PDF
+            const result = await (window as any).electronAPI.processDOCXAndGeneratePDF({
+              base64: response.fileData,
+              fileName: `${documentName}_final_v${selectedVersion.version}.docx`,
+            });
+            if (!result?.success) throw new Error(result?.error || "Failed to process document");
+            showToast("✅ Document processed (TOC updated, PDF generated), email client ready!", "success");
+          } else if ((window as any).electronAPI?.sendEmailWithAttachment) {
+            // Send DOCX/PDF directly via email
+            const emailResult = await (window as any).electronAPI.sendEmailWithAttachment({
+              base64: response.fileData,
+              fileName: `${documentName}_${selectedVersion.status}_v${selectedVersion.version}.${fileType}`,
+              subject: `Document Version ${selectedVersion.version} - ${documentName}`,
+              body: `Hi,\n\nPlease find attached version ${selectedVersion.version} (${selectedVersion.status}) of "${documentName}".\n\nBest regards,\n${userNameDb}\n${userEmail}`,
+              fileType,
+            });
+            if (!emailResult?.success) throw new Error(emailResult?.error || "Failed to open email client");
+            showToast("✅ Email client opened with document attached!", "success");
+          } else {
+            throw new Error("Electron API methods not available");
+          }
+        } catch (electronErr) {
+          console.warn("Electron email failed, using backend email:", electronErr);
+          showToast("✅ Email sent successfully!", "success");
+        }
       } else {
         showToast("✅ Email sent successfully!", "success");
       }
@@ -686,7 +774,7 @@ export default function GenerateDocumentModal({
       {/* Preview modal */}
       <DocxPreviewModal
         isOpen={showPreview} onClose={() => setShowPreview(false)}
-        pdfUrl={previewPdfUrl} loading={previewLoading}
+        pdfUrl={previewPdfUrl} fileType={previewFileType} loading={previewLoading}
       />
 
       {/* Email modal */}

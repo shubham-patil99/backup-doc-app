@@ -11,7 +11,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   generateTOC: (docPath) => {
     try {
-      return ipcRenderer.invoke("generate-toc", docPath);
+      return ipcRenderer
+        .invoke("generate-toc", docPath)
+        .then((result) => result || { success: false, error: "Null response" })
+        .catch((err) => ({ success: false, error: String(err) }));
     } catch (err) {
       return Promise.resolve({ success: false, error: String(err) });
     }
@@ -19,7 +22,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   generateTOCAndExportPDF: (docPath) => {
     try {
-      return ipcRenderer.invoke("generate-toc-pdf", docPath);
+      return ipcRenderer
+        .invoke("generate-toc-pdf", docPath)
+        .then((result) => result || { success: false, error: "Null response" })
+        .catch((err) => ({ success: false, error: String(err) }));
     } catch (err) {
       return Promise.resolve({ success: false, error: String(err) });
     }
@@ -31,7 +37,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
    */
   saveDocxAndUpdateTOC: (base64, fileName) => {
     try {
-      return ipcRenderer.invoke("save-docx-toc", { base64, fileName });
+      return ipcRenderer
+        .invoke("save-docx-toc", { base64, fileName })
+        .then((result) => result || { success: false, error: "Null response" })
+        .catch((err) => ({ success: false, error: String(err) }));
     } catch (err) {
       return Promise.resolve({ success: false, error: String(err) });
     }
@@ -44,9 +53,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
    */
   sendEmailWithAttachment: (params) => {
     try {
-      return ipcRenderer.invoke("send-email-with-attachment", params);
+      return ipcRenderer
+        .invoke("send-email-with-attachment", params)
+        .then((result) => result || { success: false, error: "Null response" })
+        .catch((err) => ({ success: false, error: String(err) }));
     } catch (err) {
       return Promise.resolve({ success: false, error: String(err) });
+    }
+  },
+
+  /**
+   * ✅ Complete pipeline: base64 DOCX → Save → Update TOC → Generate PDF
+   * Params: { base64, fileName }
+   * Returns: { success, docxPath, pdfPath, docxFileName, pdfFileName, downloadDir, error? }
+   */
+  processDOCXAndGeneratePDF: (params) => {
+    try {
+      return ipcRenderer
+        .invoke("process-docx-pdf", params)
+        .then((result) => result || { success: false, error: "Null response from IPC", docxPath: null, pdfPath: null })
+        .catch((err) => ({ success: false, error: String(err), docxPath: null, pdfPath: null }));
+    } catch (err) {
+      return Promise.resolve({
+        success: false,
+        error: String(err),
+        docxPath: null,
+        pdfPath: null,
+      });
     }
   },
 });

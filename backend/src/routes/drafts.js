@@ -16,6 +16,9 @@ router.put("/update-ope", draftController.updateOpeId);
 // Delete all versions for an OPE
 router.delete("/delete-all/:opeId", draftController.deleteAllVersionsForOpe);
 
+// ✅ Delete all versions for an OPE + specific SoW type
+router.delete("/delete-all/:opeId/:sowType", draftController.deleteAllVersionsForOpeAndSowType);
+
 // Get Draft by OPE
 router.get("/:opeId", draftController.getDraftByOpe); 
 
