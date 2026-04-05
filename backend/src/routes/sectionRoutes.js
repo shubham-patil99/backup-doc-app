@@ -5,20 +5,61 @@ const VALID_DOC_TYPES = ["full", "small", "proposal"];
 
 router.post("/", async (req, res) => {
   try {
-    const { docType, ...rest } = req.body;
+    const { docType, docTypes, ...rest } = req.body;
 
-    if (!docType || !VALID_DOC_TYPES.includes(docType)) {
+    // Accept either singular docType or plural docTypes, convert to array
+    let typesArray = docTypes || docType;
+    
+    // Handle case where array contains JSON strings
+    if (Array.isArray(typesArray)) {
+      typesArray = typesArray.map(item => {
+        if (typeof item === 'string' && item.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(item);
+            return Array.isArray(parsed) ? parsed : item;
+          } catch (e) {
+            return item;
+          }
+        }
+        return item;
+      }).flat(); // Flatten in case parsing creates nested arrays
+    }
+    
+    // Convert string to array if needed
+    if (typeof typesArray === 'string') {
+      if (typesArray.startsWith('[')) {
+        try {
+          typesArray = JSON.parse(typesArray);
+        } catch (e) {
+          typesArray = [typesArray];
+        }
+      } else {
+        typesArray = [typesArray];
+      }
+    }
+    
+    if (!Array.isArray(typesArray) || typesArray.length === 0) {
       return res.status(400).json({
-        error: "Invalid docType. Must be 'full', 'small', or 'proposal'",
+        error: "docTypes must be a non-empty array of doc types",
       });
     }
+
+    const invalid = VALID_DOC_TYPES ? typesArray.filter(t => !VALID_DOC_TYPES.includes(t)) : [];
+    if (invalid.length > 0) {
+      return res.status(400).json({
+        error: `Invalid docTypes: ${invalid.join(', ')}. Must be from: ${VALID_DOC_TYPES.join(', ')}`,
+      });
+    }
+
+    // Remove duplicates
+    const uniqueTypes = [...new Set(typesArray)];
 
     const maxPos = await Section.max("position").catch(() => null);
     const nextPos = (Number.isFinite(maxPos) ? maxPos : 0) + 1;
 
     const payload = {
       ...rest,
-      docType,
+      docType: uniqueTypes,
       position: nextPos,
     };
 
@@ -71,20 +112,22 @@ router.get("/all", async (req, res) => {
   try {
     const { docType } = req.query;
 
-    const where = {};
-    if (docType && VALID_DOC_TYPES.includes(docType)) {
-      where.docType = docType;
-    }
-
     const orderClause =
       Section?.rawAttributes?.position
         ? [["position", "ASC"]]
         : [["createdAt", "ASC"]];
 
-    const allSections = await Section.findAll({
-      where,
+    let allSections = await Section.findAll({
       order: orderClause,
     });
+
+    // Filter by docType if specified (check if docType is in the array)
+    if (docType && typeof docType === 'string') {
+      allSections = allSections.filter(section => {
+        const types = Array.isArray(section.docType) ? section.docType : [section.docType];
+        return types.includes(docType);
+      });
+    }
 
     res.json(allSections);
   } catch (err) {
@@ -100,15 +143,22 @@ router.get("/", async (req, res) => {
     const limit = parseInt(req.query.limit) || 3;
     const { docType } = req.query;
 
-    const where = {};
-    if (docType && VALID_DOC_TYPES.includes(docType)) {
-      where.docType = docType;
-    }
+    const orderClause =
+      Section?.rawAttributes?.position
+        ? [["position", "ASC"]]
+        : [["createdAt", "ASC"]];
 
-    const allSections = await Section.findAll({
-      where,
-      order: [["position", "ASC"]],
+    let allSections = await Section.findAll({
+      order: orderClause,
     });
+
+    // Filter by docType if specified (check if docType is in the array)
+    if (docType && typeof docType === 'string') {
+      allSections = allSections.filter(section => {
+        const types = Array.isArray(section.docType) ? section.docType : [section.docType];
+        return types.includes(docType);
+      });
+    }
 
     const totalCount = allSections.length;
     const totalPages = Math.ceil(totalCount / limit);
@@ -149,18 +199,72 @@ router.put("/:id", async (req, res) => {
     if (!section)
       return res.status(404).json({ error: "Section not found" });
 
-    const { docType } = req.body;
+    const { docType, docTypes } = req.body;
+    console.log("[PUT /sections/:id] Received docType:", docType, "docTypes:", docTypes);
 
-    // ✅ Validate docType if provided
-    if (docType && !VALID_DOC_TYPES.includes(docType)) {
-      return res.status(400).json({
-        error: "Invalid docType. Must be 'full', 'small', or 'proposal'",
-      });
+    // Validate docType/docTypes if provided
+    if (docType !== undefined || docTypes !== undefined) {
+      let typesArray = docTypes || docType;
+      console.log("[PUT /sections/:id] Initial typesArray:", typesArray, "Type:", typeof typesArray);
+      
+      // Handle case where array contains JSON strings (e.g., from client parsing)
+      if (Array.isArray(typesArray)) {
+        typesArray = typesArray.map(item => {
+          if (typeof item === 'string' && item.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(item);
+              return Array.isArray(parsed) ? parsed : item;
+            } catch (e) {
+              return item;
+            }
+          }
+          return item;
+        }).flat(); // Flatten in case parsing creates nested arrays
+      }
+      
+      // Convert string to array if needed
+      if (typeof typesArray === 'string') {
+        if (typesArray.startsWith('[')) {
+          try {
+            typesArray = JSON.parse(typesArray);
+          } catch (e) {
+            typesArray = [typesArray];
+          }
+        } else {
+          typesArray = [typesArray];
+        }
+      }
+      
+      if (!Array.isArray(typesArray) || typesArray.length === 0) {
+        console.error("[PUT /sections/:id] Not an array or empty:", typesArray);
+        return res.status(400).json({
+          error: "docTypes must be a non-empty array of doc types",
+        });
+      }
+
+      const VALID_DOC_TYPES = ["full", "small", "proposal"];
+      const invalid = typesArray.filter(t => !VALID_DOC_TYPES.includes(t));
+      if (invalid.length > 0) {
+        console.error("[PUT /sections/:id] Invalid doc types:", invalid);
+        return res.status(400).json({
+          error: `Invalid docTypes: ${invalid.join(', ')}. Must be from: ${VALID_DOC_TYPES.join(', ')}`,
+        });
+      }
+
+      // Remove duplicates
+      const uniqueTypes = [...new Set(typesArray)];
+      console.log("[PUT /sections/:id] Final uniqueTypes:", uniqueTypes);
+      
+      // Update the request body to use the processed array
+      req.body.docType = uniqueTypes;
+      delete req.body.docTypes;
     }
 
     await section.update(req.body);
+    console.log("[PUT /sections/:id] Section updated successfully");
     res.json(section);
   } catch (err) {
+    console.error("[PUT /sections/:id] Error:", err.message);
     res.status(400).json({ error: err.message });
   }
 });

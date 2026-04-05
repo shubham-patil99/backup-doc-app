@@ -25,6 +25,7 @@ interface Module {
   sectionId: number;
   canEdit: boolean;
   position?: number;
+  instanceId?: string; // ✅ Unique ID for each instance (allows duplicates)
 }
 
 interface Section {
@@ -132,10 +133,33 @@ export default function CreateDocumentContent() {
   const initialDraftLoadedRef = useRef(false);
   const dataFetchedAfterLoadRef = useRef(false);  // ✅ Prevent infinite fetch loop
 
+  // ─── Helper to check if section/module matches current SoW type ─────────────────
+
+  const parseSectionDocTypes = (docType: any): string[] => {
+    if (Array.isArray(docType)) {
+      return docType.map(t => String(t).toLowerCase());
+    }
+    if (typeof docType === 'string') {
+      if (docType.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(docType);
+          return Array.isArray(parsed) ? parsed.map(t => String(t).toLowerCase()) : [docType.toLowerCase()];
+        } catch (e) {
+          return [docType.toLowerCase()];
+        }
+      }
+      return [docType.toLowerCase()];
+    }
+    return ["full"];
+  };
+
   // ─── Computed lists filtered by docType ─────────────────────────────────────
 
   const visibleSections = React.useMemo(
-    () => sections.filter((s) => String(s.docType || "").toLowerCase() === sowSize.toLowerCase()),
+    () => sections.filter((s) => {
+      const docTypes = parseSectionDocTypes(s.docType);
+      return docTypes.includes(sowSize.toLowerCase());
+    }),
     [sections, sowSize]
   );
 
@@ -143,7 +167,9 @@ export default function CreateDocumentContent() {
     () =>
       modules.filter((m) => {
         const sec = sections.find((s) => Number(s.id) === Number(m.sectionId));
-        return !!sec && String(sec.docType || "").toLowerCase() === sowSize.toLowerCase();
+        if (!sec) return false;
+        const docTypes = parseSectionDocTypes(sec.docType);
+        return docTypes.includes(sowSize.toLowerCase());
       }),
     [modules, sections, sowSize]
   );
@@ -898,17 +924,27 @@ export default function CreateDocumentContent() {
     const updated = documentSections.filter((s) => s.id !== sectionId);
     setDocumentSections(updated);
     await autoSaveDraft(updated);
-    if (removedSection) setSections((prev) => [...prev.filter((s) => s.id !== sectionId), { ...removedSection }]);
+    if (removedSection) setSections((prev) => [...prev, { id: removedSection.id, title: removedSection.title, description: removedSection.description, docType: removedSection.docType }]);
     showToast("Section removed from document!");
   };
 
   const removeModule = (moduleId: number, sectionId: number) => {
     setDocumentSections((prev) => {
-      const updated = prev.map((section) =>
-        section.id === sectionId
-          ? { ...section, modules: section.modules.filter((m) => m.id !== moduleId) }
-          : section
-      );
+      const updated = prev.map((section) => {
+        if (section.id !== sectionId) return section;
+        // ✅ Remove only the FIRST instance of this module (allows duplicates)
+        let removed = false;
+        return {
+          ...section,
+          modules: section.modules.filter((m) => {
+            if (!removed && m.id === moduleId) {
+              removed = true;
+              return false; // Remove this one instance
+            }
+            return true;
+          }),
+        };
+      });
       autoSaveDraft(updated);
       return updated;
     });
@@ -1086,10 +1122,8 @@ const handlePreview = async () => {
         showToast(`${status.toUpperCase()} document saved successfully!`);
         if (status === "draft") setDraftVersions((prev) => [...prev, saveRes.draft]);
         else setFinalVersions((prev) => [...prev, saveRes.final]);
-        setDocumentSections([]);
-        setDocumentName("SoW Document");
         await refreshSourceLists();
-        showToast(`${status.toUpperCase()} document generated. Builder reset.`);
+        showToast(`${status.toUpperCase()} document generated. Keep editing or generate again!`);
       } else { showToast(`Failed to save ${status} document`); }
     } catch (error) {
       console.error(error);
@@ -1231,45 +1265,62 @@ const handlePreview = async () => {
       const saveRes = await autoSaveDraft(sorted);
       if (!saveRes?.success) {
         setDocumentSections(documentSections);
-        setSections((prev) => [...prev, { id: section.id, title: section.title, description: section.description }]);
         showToast("Failed to save section. Changes reverted.");
         return;
       }
-      await syncFromServer({ refreshVersions: false });
-      setSections((prev) => prev.filter((s) => s.id !== section.id));
       showToast("Section added to document!");
       return;
     }
 
     if (dragData.type === "MODULE") {
       const { module, sectionId } = dragData.data;
+      
+      // ✅ If module object isn't provided, it's a REORDER operation (handled by onModuleDrop)
+      // Skip here and let onModuleDrop handle the reordering
+      if (!module) {
+        return;
+      }
+
       const freshSections2 = await refreshSourceLists();
       const sectionIndex = documentSections.findIndex((s) => s.id === sectionId);
       if (sectionIndex === -1) {
         const sourceSection = (freshSections2 || sections).find((s) => s.id === sectionId);
         if (sourceSection) {
           const sorted2 = sortSectionsByPosition(
-            [...documentSections, { id: sourceSection.id, title: sourceSection.title, description: sourceSection.description, position: Number.isFinite(Number(sourceSection.position)) ? Number(sourceSection.position) : undefined, modules: [module] }],
+            [...documentSections, { 
+              id: sourceSection.id, 
+              title: sourceSection.title, 
+              description: sourceSection.description, 
+              position: Number.isFinite(Number(sourceSection.position)) ? Number(sourceSection.position) : undefined, 
+              modules: [{ 
+                ...module, 
+                instanceId: `${module.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`
+              }] 
+            }],
             freshSections2 || sections
           );
           setDocumentSections(sorted2);
           const saveRes = await autoSaveDraft(sorted2);
-          if (!saveRes?.success) { setDocumentSections(documentSections); setModules((p) => [...p, module]); showToast("Failed to save module. Changes reverted."); return; }
-          setModules((p) => p.filter((m) => m.id !== module.id));
+          if (!saveRes?.success) { setDocumentSections(documentSections); showToast("Failed to save module. Changes reverted."); return; }
         }
       } else {
         const updatedSections = sortSectionsByPosition(
           documentSections.map((section) =>
             section.id === sectionId
-              ? { ...section, modules: section.modules.some((m) => m.id === module.id) ? section.modules : [...section.modules, module] }
+              ? { 
+                  ...section, 
+                  modules: [...section.modules, { 
+                    ...module, 
+                    instanceId: `${module.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`
+                  }] 
+                }
               : section
           ),
           freshSections2 || sections
         );
         setDocumentSections(updatedSections);
         const saveRes = await autoSaveDraft(updatedSections);
-        if (!saveRes?.success) { setDocumentSections(documentSections); setModules((p) => [...p, module]); showToast("Failed to save module. Changes reverted."); return; }
-        setModules((p) => p.filter((m) => m.id !== module.id));
+        if (!saveRes?.success) { setDocumentSections(documentSections); showToast("Failed to save module. Changes reverted."); return; }
       }
       showToast("Module added to section!");
     }
@@ -1575,7 +1626,7 @@ const handlePreview = async () => {
                       </div>
                       {section.modules?.map((module, moduleIndex) => (
                         <div
-                          key={module.id} draggable
+                          key={module.instanceId || `${section.id}_${moduleIndex}`} draggable
                           onDragStart={(e) => onModuleDragStart(e, module.id, section.id, moduleIndex)}
                           onDragEnd={onModuleDragEnd}
                           onDragEnter={(e) => onModuleDragEnter(e, section.id, moduleIndex)}

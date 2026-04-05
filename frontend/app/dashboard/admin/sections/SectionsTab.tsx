@@ -8,6 +8,7 @@ import {
   AlertCircle,
   Layout,
   X,
+  GripVertical,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 import {
@@ -29,10 +30,37 @@ import { CSS } from "@dnd-kit/utilities";
 interface Section {
   id: number;
   title: string;
-  docType: "full" | "small" | "proposal";
+  docType: string[] | string; // Can be array or single value for backward compat
   createdAt?: string;
   updatedAt?: string;
 }
+
+// Helper function to safely parse docType to array
+const parseDocTypes = (docType: any): string[] => {
+  if (Array.isArray(docType)) {
+    // If it's already an array, return it as-is
+    return docType;
+  }
+  
+  if (typeof docType === 'string') {
+    // Try to parse as JSON if it looks like stringified JSON
+    if (docType.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(docType);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch (e) {
+        // Not valid JSON, treat as single value
+      }
+    }
+    // Return as single-item array
+    return [docType];
+  }
+  
+  // Default fallback
+  return ["full"];
+};
 
 function SortableItem({
   section,
@@ -44,22 +72,41 @@ function SortableItem({
   onChangeEdit,
   onSaveEdit,
   onCancelEdit,
-   onDocTypeChange,
+  onDocTypeChange,
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({
       id: String(section.id),
-      disabled: !!isEditing, // disable drag while editing
+      disabled: !!isEditing,
     });
+  
   const style = {
     transform: CSS.Translate.toString(transform),
     transition,
     opacity: isDragging ? 0.8 : 1,
     zIndex: isDragging ? 50 : "auto",
-    // no cursor here — handle shows grab cursor
   };
 
+  // Normalize docType to array using helper function
+  const docTypes = parseDocTypes(section.docType);
 
+  const handleDocTypeToggle = (type) => {
+    let newTypes = [...docTypes];
+    
+    if (newTypes.includes(type)) {
+      newTypes = newTypes.filter(t => t !== type);
+    } else {
+      newTypes.push(type);
+    }
+    
+    // Prevent empty array - keep at least one type
+    if (newTypes.length === 0) {
+      newTypes = [type];
+      return;
+    }
+    
+    onDocTypeChange(section.id, newTypes);
+  };
 
   return (  
     <div ref={setNodeRef} style={style} className="group relative select-none">
@@ -68,7 +115,7 @@ function SortableItem({
           <span className="font-bold text-white text-xs">{index + 1}</span>
         </div>
 
-        <div className="flex items-start justify-between mb-2">
+        <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3 flex-1 min-w-0 pr-20">
             <div className="w-8 h-8 bg-gradient-to-br from-green-100 to-emerald-100 rounded-lg flex items-center justify-center shadow-sm">
               <Layout size={16} className="text-green-600" />
@@ -85,7 +132,7 @@ function SortableItem({
                     if (e.key === "Enter") onSaveEdit();
                     if (e.key === "Escape") onCancelEdit();
                   }}
-                  onClick={(e) => e.stopPropagation()} // prevent dragging while editing
+                  onClick={(e) => e.stopPropagation()}
                 />
                 <button
                   onClick={(ev) => {
@@ -105,7 +152,7 @@ function SortableItem({
                 </button>
               </div>
             ) : (
-              <h3 className="font-semibold text-gray-900 truncate text-sm">
+              <h3 className="font-semibold text-gray-900 text-sm truncate">
                 {section.title}
               </h3>
             )}
@@ -113,23 +160,6 @@ function SortableItem({
 
           {/* Drag handle + Edit/Delete buttons */}
           <div className={`flex items-center gap-2 transition-opacity duration-200 ${isEditing ? "opacity-0 pointer-events-none" : "opacity-100"}`}>
-            {/* Drag handle: attach attributes/listeners only here */}
-              <label
-              className="flex items-center gap-1 cursor-pointer"
-              title="Short SoW"
-              onClick={(e) => e.stopPropagation()}
-            >
-             <select
-              value={section.docType}
-              onChange={(e) => onDocTypeChange(section.id, e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              className="text-xs border rounded-md px-1 py-1 bg-white cursor-pointer"
-            >
-              <option value="full">Full</option>
-              <option value="small">Small</option>
-              <option value="proposal">Proposal</option>
-            </select>
-            </label>
             <button
               {...attributes}
               {...listeners}
@@ -137,7 +167,7 @@ function SortableItem({
               className="p-1.5 bg-white border rounded-md text-gray-500 hover:text-gray-700 hover:shadow-sm cursor-grab active:cursor-grabbing"
               title="Drag to reorder"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10 6h8M10 12h8M10 18h8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <GripVertical size={16} />
             </button>
 
             <button
@@ -160,6 +190,33 @@ function SortableItem({
             >
               <Trash2 size={14} />
             </button>
+          </div>
+        </div>
+
+        {/* ✅ Doc Type Checkboxes */}
+        <div className="border-t border-gray-200 pt-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            <p className="text-xs font-semibold text-gray-600 whitespace-nowrap">Assign to:</p>
+            <div className="flex gap-4">
+            {["full", "small", "proposal"].map((type) => (
+              <label
+                key={type}
+                className="flex items-center gap-2 cursor-pointer hover:text-green-600 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  checked={docTypes.includes(type)}
+                  onChange={() => handleDocTypeToggle(type)}
+                  className="w-4 h-4 rounded border-gray-300 text-green-600 cursor-pointer accent-green-600"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span className="text-sm text-gray-700 capitalize font-medium">
+                  {type}
+                </span>
+              </label>
+            ))}
+            </div>
           </div>
         </div>
       </div>
@@ -219,7 +276,7 @@ export default function SectionsTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
             title: newTitle.trim(),
-            docType: "full" // default
+            docType: ["full"] // default to array with "full"
           }),
       });
 
@@ -340,23 +397,28 @@ export default function SectionsTab() {
   }, [isDirty, savingOrder, sections]);
 
 
-const handleDocTypeChange = async (id, newDocType) => {
+const handleDocTypeChange = async (id, newDocTypes) => {
   try {
+    // Ensure it's an array
+    const typesArray = Array.isArray(newDocTypes) ? newDocTypes : [newDocTypes];
+    
     await apiFetch(`/sections/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ docType: newDocType }),
+      body: JSON.stringify({ docType: typesArray }),
     });
 
     setSections((prev) =>
       prev.map((s) =>
-        s.id === id ? { ...s, docType: newDocType } : s
+        s.id === id ? { ...s, docType: typesArray } : s
       )
     );
 
-    showSuccess(`DocType updated to ${newDocType}`);
+    const typesList = typesArray.join(", ");
+    showSuccess(`Section assigned to: ${typesList}`);
   } catch (err) {
-    console.error("Failed to update docType:", err);
+    console.error("Failed to update docTypes:", err);
+    setError("Failed to update doc types");
   }
 };
 
