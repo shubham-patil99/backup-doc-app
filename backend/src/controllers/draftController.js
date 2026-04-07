@@ -32,6 +32,14 @@ exports.autoSaveDraft = async (req, res) => {
       status
     });
 
+    // ✅ Log what the FRONTEND is sending (before normalization)
+    if (content?.documentSections && content.documentSections.length > 0) {
+      console.log("📝 FRONTEND SENT - First section modules:");
+      content.documentSections[0]?.modules?.forEach((m, i) => {
+        console.log(`  Module ${i}:`, { id: m.id, name: m.name, canEdit: m.canEdit, hasCanEdit: 'canEdit' in m });
+      });
+    }
+
     if (!opeId || !userId) {
       return res.status(400).json({ success: false, error: "OPE ID and User ID are required" });
     }
@@ -50,14 +58,21 @@ exports.autoSaveDraft = async (req, res) => {
                   name: module.name || "",
                   description: module.description || "",
                   sectionId: section.id,
-                  position: Number.isFinite(Number(module.position)) ? Number(module.position) : idx
+                  position: Number.isFinite(Number(module.position)) ? Number(module.position) : idx,
+                  canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : false
                 }))
               : []
           }))
         }
       : null;
 
-    console.log("📝 Normalized content:", JSON.stringify(normalizedContent).substring(0, 200));
+    // ✅ Log what the BACKEND is saving (after normalization)
+    if (normalizedContent?.documentSections && normalizedContent.documentSections.length > 0) {
+      console.log("📝 BACKEND SAVING - First section modules:");
+      normalizedContent.documentSections[0]?.modules?.forEach((m, i) => {
+        console.log(`  Module ${i}:`, { id: m.id, name: m.name, canEdit: m.canEdit });
+      });
+    }
 
     // ✅ Auto-save: find latest draft for THIS sowType (separate version streams)
     // Each sowType (FULL, SMALL, PROPOSAL) has independent versioning

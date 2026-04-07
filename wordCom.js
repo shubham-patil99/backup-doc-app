@@ -286,8 +286,12 @@ function generateTOCAndExportPDF(docPath) {
  * - Then error fires in catch block
  * - This means ExportAsFixedFormat() succeeded but cleanup failed
  * - Solution: Don't trap the export, let it run to completion, minimal cleanup
+ * 
+ * @param {string} base64 - Base64 encoded DOCX content
+ * @param {string} fileName - DOCX filename
+ * @param {string} tempDir - Optional temp directory (for preview). If not provided, uses Downloads
  */
-function processDOCXAndGeneratePDF(base64, fileName) {
+function processDOCXAndGeneratePDF(base64, fileName, tempDir) {
   if (process.platform !== "win32") {
     return Promise.reject(new Error("Windows only"));
   }
@@ -300,13 +304,13 @@ function processDOCXAndGeneratePDF(base64, fileName) {
   let pdfPath = null;
 
   try {
-    // Step 1: Save DOCX to Downloads
-    const downloadsDir = path.join(os.homedir(), "Downloads");
-    if (!fs.existsSync(downloadsDir)) {
-      fs.mkdirSync(downloadsDir, { recursive: true });
+    // Step 1: Save DOCX to tempDir (preview) or Downloads (document)
+    const saveDir = tempDir || path.join(os.homedir(), "Downloads");
+    if (!fs.existsSync(saveDir)) {
+      fs.mkdirSync(saveDir, { recursive: true });
     }
 
-    docxPath = path.join(downloadsDir, fileName);
+    docxPath = path.join(saveDir, fileName);
     const buffer = Buffer.from(base64, "base64");
     fs.writeFileSync(docxPath, buffer);
     console.log("[wordCom] ✅ DOCX saved to:", docxPath);
@@ -362,7 +366,7 @@ function processDOCXAndGeneratePDF(base64, fileName) {
           pdfPath,
           docxFileName: fileName,
           pdfFileName: fileName.replace(/\.docx$/i, ".pdf"),
-          downloadDir: downloadsDir,
+          downloadDir: saveDir,
         };
       })
       .catch((err) => {
@@ -377,7 +381,7 @@ function processDOCXAndGeneratePDF(base64, fileName) {
             pdfPath,
             docxFileName: fileName,
             pdfFileName: fileName.replace(/\.docx$/i, ".pdf"),
-            downloadDir: downloadsDir,
+            downloadDir: saveDir,
           };
         }
 

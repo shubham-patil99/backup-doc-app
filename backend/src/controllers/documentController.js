@@ -592,7 +592,7 @@ exports.generateDocument = async (req, res) => {
 
     const docTitle = partnerName
       ? `Statement of Work to ${partnerName} from Hewlett Packard Enterprise Company for ${customerName} for the in-scope Nonstop Services`
-      : `Statement of Work from Hewlett Packard Enterprise Company for ${customerName} for the in-scope Nonstop Services`;
+      : `Statement of Work from Hewlett Packard Enterprise Company to ${customerName} for the in-scope Nonstop Services`;
 
     const templateData = {
       isDraft: status === "draft",
@@ -692,7 +692,7 @@ exports.generateDocument = async (req, res) => {
     const formattedName =
       partnerName && partnerName.trim()
         ? `${idPart} - HPE Nonstop PSD SOW to ${partnerName} for ${customerName}_${status}_v${docVersion}`
-        : `${idPart} - HPE Nonstop PSD SOW for ${customerName}_${status}_v${docVersion}`;
+        : `${idPart} - HPE Nonstop PSD SOW to ${customerName}_${status}_v${docVersion}`;
     const sanitizedFileName = sanitizeFileName(formattedName);
 
     const sendEmailWithAttachment = async (attachmentPath, attachmentName) => {

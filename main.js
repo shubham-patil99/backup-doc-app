@@ -2,7 +2,7 @@
  * main.js  – Electron main process
  */
 
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -211,9 +211,32 @@ ipcMain.handle("save-docx-toc", async (_event, { base64, fileName }) => {
 
 // ── IPC: process-docx-pdf ──────────────────────────────────────────────────
 // ✅ NEW: Complete pipeline: save DOCX → update TOC → convert to PDF
+// Saves to system temp directory for preview (auto-cleanup)
 ipcMain.handle("process-docx-pdf", async (_event, { base64, fileName }) => {
   try {
-    const result = await processDOCXAndGeneratePDF(base64, fileName);
+    // ✅ Save to system temp instead of Downloads
+    const previewTempDir = path.join(os.tmpdir(), "hpe-doc-preview");
+    if (!fs.existsSync(previewTempDir)) {
+      fs.mkdirSync(previewTempDir, { recursive: true });
+    }
+
+    // ✅ Clean up old preview files (older than 1 hour)
+    try {
+      const files = fs.readdirSync(previewTempDir);
+      const oneHourAgo = Date.now() - (60 * 60 * 1000);
+      files.forEach(file => {
+        const filePath = path.join(previewTempDir, file);
+        const stats = fs.statSync(filePath);
+        if (stats.mtimeMs < oneHourAgo) {
+          try { fs.unlinkSync(filePath); } catch (_) {}
+        }
+      });
+    } catch (cleanErr) {
+      console.warn("[main] Old preview cleanup skipped:", cleanErr.message);
+    }
+
+    // ✅ Pass temp directory to processDOCXAndGeneratePDF
+    const result = await processDOCXAndGeneratePDF(base64, fileName, previewTempDir);
     return result; // Returns { success, docxPath, pdfPath, docxFileName, pdfFileName, downloadDir }
   } catch (err) {
     console.error("[main] process-docx-pdf error:", err.message);
@@ -332,6 +355,114 @@ async function _openMailtoFallback(filePath, subject, body) {
   await shell.openExternal(mailtoUri);
   return "mailto";
 }
+
+// ── IPC: select-file-path ─────────────────────────────────────────────────────
+// ✅ NEW: Show save dialog to let user pick file location
+ipcMain.handle("select-file-path", async (_event, { defaultPath, filters }) => {
+  try {
+    const result = await dialog.showSaveDialog({
+      defaultPath: path.join(os.homedir(), "Downloads", defaultPath || "document"),
+      filters: filters || [
+        { name: "All Files", extensions: ["*"] }
+      ]
+    });
+
+    if (result.canceled) {
+      return null;
+    }
+
+    return result.filePath;
+  } catch (err) {
+    console.error("[main] select-file-path error:", err.message);
+    return null;
+  }
+});
+
+// ── IPC: save-docx-with-path ─────────────────────────────────────────────────
+// ✅ NEW: Save DOCX to user-selected path with TOC update
+ipcMain.handle("save-docx-with-path", async (_event, { base64, filePath }) => {
+  try {
+    const buffer = Buffer.from(base64, "base64");
+    
+    // Ensure directory exists
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Write file
+    fs.writeFileSync(filePath, buffer);
+    console.log("[main] DOCX saved to:", filePath);
+
+    // Update TOC
+    try {
+      const tocResult = await generateTOC(filePath);
+      console.log("[main] TOC updated successfully");
+    } catch (tocErr) {
+      console.warn("[main] TOC update skipped:", tocErr.message);
+      // Don't fail - just continue without TOC
+    }
+
+    return { success: true, filePath };
+  } catch (err) {
+    console.error("[main] save-docx-with-path error:", err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ── IPC: save-file-with-path ─────────────────────────────────────────────────
+// ✅ NEW: Save PDF/PPTX to user-selected path
+ipcMain.handle("save-file-with-path", async (_event, { base64, filePath, fileType }) => {
+  try {
+    const buffer = Buffer.from(base64, "base64");
+    
+    // Ensure directory exists
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Write file
+    fs.writeFileSync(filePath, buffer);
+    console.log(`[main] ${fileType.toUpperCase()} saved to:`, filePath);
+
+    return { success: true, filePath };
+  } catch (err) {
+    console.error("[main] save-file-with-path error:", err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ── IPC: cleanup-preview-files ──────────────────────────────────────────────
+// ✅ NEW: Clean up temporary preview files (DOCX/PDF/PPTX)
+ipcMain.handle("cleanup-preview-files", async (_event, { filePaths }) => {
+  try {
+    if (!Array.isArray(filePaths)) {
+      return { success: false, error: "filePaths must be an array" };
+    }
+
+    const deleted = [];
+    const failed = [];
+
+    for (const filePath of filePaths) {
+      try {
+        if (filePath && fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          deleted.push(filePath);
+          console.log("[main] Cleaned up preview file:", filePath);
+        }
+      } catch (err) {
+        failed.push({ filePath, error: err.message });
+        console.warn("[main] Failed to cleanup preview file:", filePath, err.message);
+      }
+    }
+
+    return { success: true, deleted, failed };
+  } catch (err) {
+    console.error("[main] cleanup-preview-files error:", err.message);
+    return { success: false, error: err.message };
+  }
+});
 
 // ── App lifecycle ───────────────────────────────────────────────────────────
 app.whenReady().then(() => {

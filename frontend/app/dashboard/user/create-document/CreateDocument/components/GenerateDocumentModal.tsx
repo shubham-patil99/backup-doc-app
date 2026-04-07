@@ -45,6 +45,7 @@ export default function GenerateDocumentModal({
   const [previewFileType, setPreviewFileType] = useState<"pdf" | "docx" | "pptx">("pdf");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [previewTempFiles, setPreviewTempFiles] = useState<string[]>([]); // ✅ Track temp preview files
 
   // ── Version state ────────────────────────────────────────────────────────────
   const [localDraftVersions, setLocalDraftVersions] = useState<any[]>(draftVersions || []);
@@ -147,6 +148,21 @@ export default function GenerateDocumentModal({
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3000);
+  };
+
+  // ✅ NEW: Clean up temporary preview files
+  const cleanupPreviewFiles = async (filePaths: string[]) => {
+    if (!Array.isArray(filePaths) || filePaths.length === 0) return;
+    if (!isElectronEnv() || !(window as any).electronAPI?.cleanupPreviewFiles) return;
+
+    try {
+      const result = await (window as any).electronAPI.cleanupPreviewFiles(filePaths);
+      if (result?.success) {
+        console.log("[preview] Cleaned up temp files:", result.deleted);
+      }
+    } catch (err) {
+      console.warn("[preview] Cleanup failed (non-critical):", err);
+    }
   };
 
   const isElectronEnv = (): boolean =>
@@ -293,6 +309,11 @@ export default function GenerateDocumentModal({
               });
               
               if (result?.success && result.pdfPath) {
+                // ✅ Track temp files for cleanup
+                const tempFilesToClean = [result.pdfPath];
+                if (result.docxPath) tempFilesToClean.push(result.docxPath);
+                setPreviewTempFiles(tempFilesToClean);
+
                 // Load PDF from file system using file:// protocol
                 const fileUrl = `file:///${result.pdfPath.replace(/\\/g, "/")}`;
                 setPreviewFileType("pdf");
@@ -355,19 +376,54 @@ export default function GenerateDocumentModal({
         `${documentName}_${versionObj.status}_v${versionObj.version}`;
       const filename = ensureExtension(candidate, type);
 
-      // Electron: save via IPC so main process can update TOC
-      if (type === "docx" && isElectronEnv()) {
+      // ✅ Electron: prompt user for save location
+      if (isElectronEnv() && (window as any).electronAPI?.selectFilePath) {
         try {
+          const selectedPath = await (window as any).electronAPI.selectFilePath({
+            defaultPath: filename,
+            filters: [
+              { name: type.toUpperCase() + " Files", extensions: [type] },
+              { name: "All Files", extensions: ["*"] }
+            ]
+          });
+
+          if (!selectedPath) {
+            console.log("Download cancelled by user");
+            return;
+          }
+
           const base64 = await blobToBase64(response);
-          const result = await (window as any).electronAPI.saveDocxAndUpdateTOC(base64, filename);
-          if (result?.success) { alert(`✅ Saved to Downloads:\n${result.filePath}`); return; }
-          console.warn("[TOC] saveDocxAndUpdateTOC failed:", result?.error, "— falling back");
-        } catch (ipcErr) {
-          console.warn("[TOC] IPC error:", ipcErr, "— falling back");
+          
+          if (type === "docx") {
+            // ✅ For DOCX in Electron: save with TOC update
+            const result = await (window as any).electronAPI.saveDocxWithPath(base64, selectedPath);
+            if (result?.success) {
+              alert(`✅ Saved to:\n${result.filePath}`);
+              return;
+            } else {
+              console.warn("saveDocxWithPath failed:", result?.error);
+              alert("Failed to save file");
+              return;
+            }
+          } else {
+            // ✅ For PDF/PPTX: save directly
+            const result = await (window as any).electronAPI.saveFileWithPath(base64, selectedPath, type);
+            if (result?.success) {
+              alert(`✅ Saved to:\n${result.filePath}`);
+              return;
+            } else {
+              console.warn("saveFileWithPath failed:", result?.error);
+              alert("Failed to save file");
+              return;
+            }
+          }
+        } catch (electronErr) {
+          console.warn("Electron save dialog failed:", electronErr);
+          // Fall back to browser download
         }
       }
 
-      // Browser / fallback download
+      // ✅ Browser / fallback download (uses default Downloads folder)
       const url = window.URL.createObjectURL(response);
       const a = document.createElement("a");
       a.href = url; a.download = filename;
@@ -773,7 +829,13 @@ export default function GenerateDocumentModal({
 
       {/* Preview modal */}
       <DocxPreviewModal
-        isOpen={showPreview} onClose={() => setShowPreview(false)}
+        isOpen={showPreview}
+        onClose={() => {
+          // ✅ Clean up temp files before closing preview
+          cleanupPreviewFiles(previewTempFiles);
+          setPreviewTempFiles([]);
+          setShowPreview(false);
+        }}
         pdfUrl={previewPdfUrl} fileType={previewFileType} loading={previewLoading}
       />
 

@@ -132,6 +132,8 @@ export default function CreateDocumentContent() {
   const skipDraftReloadRef = useRef(false);
   const initialDraftLoadedRef = useRef(false);
   const dataFetchedAfterLoadRef = useRef(false);  // ✅ Prevent infinite fetch loop
+  const savingPromiseRef = useRef<Promise<any> | null>(null);  // ✅ Track in-flight save operations
+const customerNoInitialMount = useRef(true);
 
   // ─── Helper to check if section/module matches current SoW type ─────────────────
 
@@ -235,15 +237,34 @@ export default function CreateDocumentContent() {
     docSections: DocumentSection[],
     sourceSections: Section[]
   ) => {
-    const pos = new Map(
+    // ✅ Use documentSections positions as primary (user's manual ordering)
+    // Only use source positions if documentSection doesn't have one set
+    const pos = new Map<number, number>();
+    
+    // First, map source positions for reference
+    const sourcePos = new Map(
       (sourceSections || []).map((s, i) => {
         const p = Number(s.position);
         return [s.id, Number.isFinite(p) ? p : i];
       })
     );
+    
+    // Then, use documentSections positions (user's ordering in document)
+    (docSections || []).forEach((doc, idx) => {
+      // Preserve the position from documentSections if set, otherwise use source or index
+      const docPos = Number(doc.position);
+      if (Number.isFinite(docPos)) {
+        pos.set(doc.id, docPos);
+      } else if (sourcePos.has(doc.id)) {
+        pos.set(doc.id, sourcePos.get(doc.id)!);
+      } else {
+        pos.set(doc.id, idx);
+      }
+    });
+    
     return [...docSections]
       .sort((a, b) => (pos.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.id) ?? Number.MAX_SAFE_INTEGER))
-      .map((s) => ({ ...s, position: pos.has(s.id) ? pos.get(s.id) : s.position }));
+      .map((s) => ({ ...s, position: pos.get(s.id) ?? s.position }));
   };
 
   const replaceTags = (text: string, vars: any) => {
@@ -362,26 +383,59 @@ export default function CreateDocumentContent() {
     return () => { ro?.disconnect(); window.removeEventListener("resize", update); };
   }, [sections, documentSections, builderMinHeight]);
 
-  /** Init from localStorage */
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const currentOpeId = localStorage.getItem("currentOpeId") || "";
-      const customerInfo = JSON.parse(localStorage.getItem("customerInfo") || "{}");
-      setUserId(user?.id || 1);
-      setUserNameDb(user?.name || user?.email || "User");
-      setUsername(user?.name || user?.email || "User");
-      setUserEmail(user?.email || "");
-      setOpeId(currentOpeId);
-      setNewOpeId(currentOpeId);
-      setCustomerName(customerInfo?.customerName || "");
-      setCustomerNo(customerInfo?.customerNo || "");
-      const partnerValue = customerInfo?.partnerName || customerInfo?.contractingParty || "";
-      setContractingParty(partnerValue);
-      setPartnerName(partnerValue);
-    } catch (e) { console.error("localStorage init error:", e); }
-  }, []);
+  // ✅ Skip the first render — localStorage init hasn't hydrated yet
+  if (customerNoInitialMount.current) {
+    customerNoInitialMount.current = false;
+    return;
+  }
+  if (!customerNo) {
+    // User explicitly cleared the field — clear the name too
+    setCustomerName("");
+    setErrors((prev) => { const { customerNo: _, ...rest } = prev; return rest; });
+    return;
+  }
+  if (customerNoDebounceRef.current) clearTimeout(customerNoDebounceRef.current);
+  customerNoDebounceRef.current = setTimeout(() => {
+    fetchCustomerDetails().catch((e) => console.warn("Debounced fetchCustomer failed:", e));
+  }, 600);
+  return () => { if (customerNoDebounceRef.current) clearTimeout(customerNoDebounceRef.current); };
+}, [customerNo]);
+
+  /** Init from localStorage */
+useEffect(() => {
+  if (typeof window === "undefined") return;
+  try {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const currentOpeId = localStorage.getItem("currentOpeId") || "";
+    const customerInfo = JSON.parse(localStorage.getItem("customerInfo") || "{}");
+    setUserId(user?.id || 1);
+    setUserNameDb(user?.name || user?.email || "User");
+    setUsername(user?.name || user?.email || "User");
+    setUserEmail(user?.email || "");
+    setOpeId(currentOpeId);
+    setNewOpeId(currentOpeId);
+    setCustomerName(customerInfo?.customerName || "");
+    setCustomerNo(customerInfo?.customerNo || "");
+    const partnerValue = customerInfo?.partnerName || customerInfo?.contractingParty || "";
+    setContractingParty(partnerValue);
+    setPartnerName(partnerValue);
+
+    // ✅ If we have a stored customerNo, fetch fresh name from server immediately
+    // This ensures the label shows the live name, not just the cached one
+    if (customerInfo?.customerNo) {
+      apiFetch(`/customer/${customerInfo.customerNo}`)
+        .then((data) => {
+          if (data?.success && data?.customer) {
+            setCustomerName(data.customer.customerName);
+          }
+        })
+        .catch(() => {
+          // Silently fall back to cached customerName from localStorage
+        });
+    }
+  } catch (e) { console.error("localStorage init error:", e); }
+}, []);
 
   /** Reload if URL opeId mismatches state */
   useEffect(() => {
@@ -439,23 +493,29 @@ export default function CreateDocumentContent() {
             title: sec.title || "",
             description: sec.description || "",
             position: sec.position,
-            modules: (sec.modules || []).map((m) => {
+            modules: (sec.modules || []).map((m, idx) => {
               const full = modules.find((x) => String(x.id) === String(m.id));
               return {
                 id: m.id,
                 name: m.name ?? full?.name ?? "",
                 description: m.description ?? full?.description ?? "",
-                canEdit: typeof full?.canEdit !== "undefined" ? full.canEdit : !!m.canEdit,
+                // ✅ Preserve saved canEdit from draft, then check source, default to false
+                canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : (typeof full?.canEdit !== "undefined" ? full.canEdit : false),
                 sectionId: sec.id,
-                position: full?.position ?? m.position,
+                // ✅ Use saved position if available, otherwise use array index for consistency
+                position: typeof m.position !== "undefined" ? m.position : idx,
+                // ✅ Generate unique instanceId for loaded modules (prevents duplicate key errors)
+                instanceId: m.instanceId || `${m.id}_${sec.id}_${Math.random().toString(36).substring(7)}`,
               };
             }),
           }));
 
           setDocumentSections(mergedSections);
-          setCustomerName(source.customerName || customerName);
-          setPartnerName(source.partnerName || partnerName);
-          setQuoteId(source.quoteId || null);
+          // ✅ Only set customer info from draft if it has non-empty values
+          // Otherwise preserve values loaded from localStorage in the init effect
+          if (source.customerName) setCustomerName(source.customerName);
+          if (source.partnerName) setPartnerName(source.partnerName);
+          if (source.quoteId) setQuoteId(source.quoteId);
 
           const loadedSowType =
             source.sowType === "SMALL" ? "small" : source.sowType === "PROPOSAL" ? "proposal" : "full";
@@ -501,7 +561,7 @@ export default function CreateDocumentContent() {
     if (isDefault || startsWithCurrentOpe) {
       const formattedBase = contractingParty?.trim()
         ? `${opeId} - HPE Nonstop PSD SOW to ${contractingParty} for ${customerName}`
-        : `${opeId} - HPE Nonstop PSD SOW for ${customerName}`;
+        : `${opeId} - HPE Nonstop PSD SOW to ${customerName}`;
       if (documentName !== formattedBase) setDocumentName(formattedBase);
     }
   }, [opeId, customerName, contractingParty]);
@@ -611,6 +671,8 @@ export default function CreateDocumentContent() {
         sectionId: m.sectionId || m.section_id,
         position: Number.isFinite(Number(m.position)) ? Number(m.position)
           : Number.isFinite(Number(m.sortOrder)) ? Number(m.sortOrder) : undefined,
+        // ✅ Ensure canEdit is always set (default to true for user-editable modules)
+        canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : true,
       }));
       const normalizedSections = (sectionsRes || [])
         .map((s, idx) => {
@@ -641,7 +703,12 @@ export default function CreateDocumentContent() {
         apiFetch(`/sections/all?docType=${docType}`),
         apiFetch("/modules"),
       ]);
-      const normalizedModules = (modulesRes || []).map((m) => ({ ...m, sectionId: m.sectionId || m.section_id }));
+      const normalizedModules = (modulesRes || []).map((m) => ({ 
+        ...m, 
+        sectionId: m.sectionId || m.section_id,
+        // ✅ Ensure canEdit is always set (default to true for user-editable modules)
+        canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : true,
+      }));
       const normalizedSections = (sectionsRes || [])
         .map((s, idx) => {
           const p = Number(s.position);
@@ -689,8 +756,11 @@ export default function CreateDocumentContent() {
                 const full = modules.find((x) => String(x.id) === String(m.id));
                 return {
                   id: m.id, name: m.name ?? full?.name ?? "", description: m.description ?? full?.description ?? "",
-                  canEdit: typeof full?.canEdit !== "undefined" ? full.canEdit : !!m.canEdit,
+                  // ✅ Preserve saved canEdit from draft, then check source, default to false
+                  canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : (typeof full?.canEdit !== "undefined" ? full.canEdit : false),
                   sectionId: sec.id, position: full?.position ?? m.position,
+                  // ✅ Generate unique instanceId for loaded modules (prevents duplicate key errors)
+                  instanceId: m.instanceId || `${m.id}_${sec.id}_${Math.random().toString(36).substring(7)}`,
                 };
               }),
             }));
@@ -701,97 +771,137 @@ export default function CreateDocumentContent() {
     } catch (err) { console.warn("syncFromServer failed:", err); }
   };
 
-  const fetchCustomerDetails = async () => {
-    if (!customerNo) {
-      setCustomerName("");
+const fetchCustomerDetails = async (forceNo?: string) => {
+  const no = forceNo ?? customerNo;
+  if (!no) {
+    // ✅ Only clear if user explicitly blanked the field (not on init)
+    // Don't wipe customerName on mount before localStorage has hydrated
+    return;
+  }
+  try {
+    const data = await apiFetch(`/customer/${no}`);
+    if (data.success && data.customer) {
+      setCustomerName(data.customer.customerName);
       setErrors((prev) => { const { customerNo: _, ...rest } = prev; return rest; });
-      return;
+    } else {
+      setErrors((prev) => ({ ...prev, customerNo: "Customer not found" }));
     }
-    try {
-      const data = await apiFetch(`/customer/${customerNo}`);
-      if (data.success && data.customer) {
-        setCustomerName(data.customer.customerName);
-        setErrors((prev) => { const { customerNo: _, ...rest } = prev; return rest; });
-      } else {
-        setCustomerName("");
-        setErrors((prev) => ({ ...prev, customerNo: "Customer not found" }));
-      }
-    } catch {
-      setCustomerName("");
-      setErrors((prev) => ({ ...prev, customerNo: "Failed to fetch customer details" }));
-    }
-  };
+  } catch {
+    setErrors((prev) => ({ ...prev, customerNo: "Failed to fetch customer details" }));
+  }
+};
 
   // ─── Auto Save ───────────────────────────────────────────────────────────────
 
+  const waitForPendingSave = async (maxWaitMs = 5000) => {
+    const startTime = Date.now();
+    while (savingPromiseRef.current && Date.now() - startTime < maxWaitMs) {
+      try {
+        await savingPromiseRef.current;
+      } catch (e) {
+        console.warn("Pending save failed, continuing:", e);
+      }
+      // Re-check if still pending
+      if (!savingPromiseRef.current) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+  };
+
   const autoSaveDraft = async (newDocumentSections = documentSections, explicitSowType = null) => {
-    if (isSaving || autoSaveInProgress) { console.debug("autoSaveDraft: already in progress, skipping"); return; }
-    setIsSaving(true);
-    setAutoSaveInProgress(true);
-    try {
-      const normalizedSections = (newDocumentSections || []).map((section) => ({
+    // ✅ Wait for any in-flight save to complete before starting a new one
+    if (savingPromiseRef.current) {
+      console.debug("autoSaveDraft: waiting for pending save...");
+      try {
+        await savingPromiseRef.current;
+      } catch (e) {
+        console.warn("Previous save failed, continuing:", e);
+      }
+    }
+    
+    if (isSaving || autoSaveInProgress) { 
+      console.debug("autoSaveDraft: already in progress, skipping"); 
+      return; 
+    }
+    
+    // ✅ Create and store the save promise so other operations can wait for it
+    const savePromise = (async () => {
+      setIsSaving(true);
+      setAutoSaveInProgress(true);
+      try {
+        const normalizedSections = (newDocumentSections || []).map((section) => ({
         id: section.id,
         title: section.title || "",
         description: section.description || "",
+        position: section.position,
         modules: (section.modules || []).map((module) => ({
           id: module.id,
           name: module.name || "",
           description: sanitizeDescription(normalizeInlineLists(module.description || "")),
           sectionId: section.id,
+          position: module.position,
+          canEdit: module.canEdit, // ✅ Include canEdit to preserve editability
         })),
       }));
 
       const storedUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("user") || "{}") : {};
-      const storedOpe = typeof window !== "undefined" ? (localStorage.getItem("currentOpeId") || "") : "";
-      const effectiveUserId = userId || storedUser?.id || null;
-      const effectiveOpeId = opeId || storedOpe || null;
-      const effectiveSowType = explicitSowType || sowSize;
+        const storedOpe = typeof window !== "undefined" ? (localStorage.getItem("currentOpeId") || "") : "";
+        const effectiveUserId = userId || storedUser?.id || null;
+        const effectiveOpeId = opeId || storedOpe || null;
+        const effectiveSowType = explicitSowType || sowSize;
 
-      const sowTypeStr =
-        effectiveSowType === "small" ? "SMALL" : effectiveSowType === "proposal" ? "PROPOSAL" : "FULL";
+        const sowTypeStr =
+          effectiveSowType === "small" ? "SMALL" : effectiveSowType === "proposal" ? "PROPOSAL" : "FULL";
 
-      const draftData = {
-        opeId: effectiveOpeId,
-        userId: effectiveUserId,
-        customerName,
-        customerNo,
-        contractingParty: contractingParty || null,
-        partnerName: contractingParty || partnerName || null,
-        documentName,
-        quoteId: quoteId || null,
-        content: { documentSections: normalizedSections },
-        sowType: sowTypeStr,
-        status: "draft",
-        // ✅ Don't send version - backend finds and updates latest version
-      };
+        const draftData = {
+          opeId: effectiveOpeId,
+          userId: effectiveUserId,
+          customerName,
+          customerNo,
+          contractingParty: contractingParty || null,
+          partnerName: contractingParty || partnerName || null,
+          documentName,
+          quoteId: quoteId || null,
+          content: { documentSections: normalizedSections },
+          sowType: sowTypeStr,
+          status: "draft",
+          // ✅ Don't send version - backend finds and updates latest version
+        };
 
-      if (!effectiveOpeId || !effectiveUserId) {
-        localStorage.setItem("pendingDraft", JSON.stringify(draftData));
-        showToast("Draft saved locally (assign OPE to persist)");
+        if (!effectiveOpeId || !effectiveUserId) {
+          localStorage.setItem("pendingDraft", JSON.stringify(draftData));
+          showToast("Draft saved locally (assign OPE to persist)");
+          setIsSaving(false); setAutoSaveInProgress(false);
+          return { success: false, reason: "no-ope-or-user", savedLocally: true };
+        }
+
+        const res = await apiFetch("/drafts/autosave", {
+          method: "PUT",
+          body: JSON.stringify(draftData),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        if (res?.success && res.draft) {
+          setVersion(res.draft.version || version);
+          try { localStorage.removeItem("pendingDraft"); } catch {}
+          if (res.draft.documentName) setDocumentName(res.draft.documentName);
+          else if (res.draft.fileName) setDocumentName(deriveBaseName(res.draft.fileName));
+        }
         setIsSaving(false); setAutoSaveInProgress(false);
-        return { success: false, reason: "no-ope-or-user", savedLocally: true };
+        return res;
+      } catch (error) {
+        console.error("Auto-save failed:", error);
+        showToast("Failed to auto-save draft");
+        setIsSaving(false); setAutoSaveInProgress(false);
+        return { success: false, error: error?.message || error };
+      } finally {
+        // ✅ Clear the promise ref when save completes
+        savingPromiseRef.current = null;
       }
-
-      const res = await apiFetch("/drafts/autosave", {
-        method: "PUT",
-        body: JSON.stringify(draftData),
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (res?.success && res.draft) {
-        setVersion(res.draft.version || version);
-        try { localStorage.removeItem("pendingDraft"); } catch {}
-        if (res.draft.documentName) setDocumentName(res.draft.documentName);
-        else if (res.draft.fileName) setDocumentName(deriveBaseName(res.draft.fileName));
-      }
-      setIsSaving(false); setAutoSaveInProgress(false);
-      return res;
-    } catch (error) {
-      console.error("Auto-save failed:", error);
-      showToast("Failed to auto-save draft");
-      setIsSaving(false); setAutoSaveInProgress(false);
-      return { success: false, error: error?.message || error };
-    }
+    })();
+    
+    // ✅ Store promise so other operations can wait for this save
+    savingPromiseRef.current = savePromise;
+    return savePromise;
   };
 
   const debouncedAutoSave = (secs: any[], sowType: any = null) => {
@@ -911,6 +1021,14 @@ export default function CreateDocumentContent() {
       const saveResult = await autoSaveDraft(updatedSections);
       if (saveResult?.success) {
         setDocumentSections(updatedSections);
+        // ✅ Also update the source modules array so sidebar and merge effect stay in sync
+        setModules((prev) =>
+          prev.map((m) =>
+            m.id === editingModule?.id
+              ? { ...m, name: editedName, description: sanitizeDescription(normalizeInlineLists(editedDescription || "")) }
+              : m
+          )
+        );
         setEditingModule(null); setEditedDescription(""); setEditedName("");
         showToast("Module updated successfully!");
       } else { showToast("Failed to save module changes"); }
@@ -1211,39 +1329,43 @@ const handlePreview = async () => {
     }, 10);
   };
 
-  const onModuleDrop = async (e: React.DragEvent, targetSectionId: number, targetIndex: number) => {
-    e.preventDefault();
-    try {
-      const parsed = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
-      if (!parsed || parsed.type !== "MODULE" || !parsed.data) return;
-      const { sectionId: sourceSectionId, index: sourceIndex } = parsed.data;
-      if (Number(sourceSectionId) !== Number(targetSectionId)) return;
+const onModuleDrop = async (e: React.DragEvent, targetSectionId: number, targetIndex: number) => {
+  e.preventDefault();
+  try {
+    const parsed = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
+    if (!parsed || parsed.type !== "MODULE" || !parsed.data) return;
+    const { sectionId: sourceSectionId, index: sourceIndex } = parsed.data;
+    if (Number(sourceSectionId) !== Number(targetSectionId)) return;
 
-      let updatedForSave: any[] | null = null;
-      setDocumentSections((prev) => {
-        const updated = prev.map((section) => {
-          if (section.id !== Number(sourceSectionId)) return section;
-          const mods = [...(section.modules || [])];
-          const src = Number(sourceIndex), tgt = Number(targetIndex);
-          if (src === tgt || src === tgt - 1) return section;
-          const [moved] = mods.splice(src, 1);
-          if (!moved) return section;
-          let insertAt = tgt;
-          if (src < tgt) insertAt = Math.max(0, tgt - 1);
-          if (insertAt > mods.length) insertAt = mods.length;
-          mods.splice(insertAt, 0, moved);
-          return { ...section, modules: mods };
-        });
-        updatedForSave = updated;
-        return updated;
-      });
-      if (updatedForSave) {
-        await new Promise((r) => setTimeout(r, 50));
-        const saveRes = await autoSaveDraft(updatedForSave);
-        if (!saveRes?.success) showToast("Warning: module order may not be saved");
-      }
-    } catch (err) { console.warn("onModuleDrop parse failed:", err); }
-  };
+    // ✅ FIX: compute updated sections eagerly using current documentSections
+    // instead of relying on the async state-setter closure to populate updatedForSave
+    const updated = documentSections.map((section) => {
+      if (section.id !== Number(sourceSectionId)) return section;
+      const mods = [...(section.modules || [])];
+      const src = Number(sourceIndex), tgt = Number(targetIndex);
+      if (src === tgt || src === tgt - 1) return section;
+      const [moved] = mods.splice(src, 1);
+      if (!moved) return section;
+      let insertAt = tgt;
+      if (src < tgt) insertAt = Math.max(0, tgt - 1);
+      if (insertAt > mods.length) insertAt = mods.length;
+      mods.splice(insertAt, 0, moved);
+      const updatedMods = mods.map((m, idx) => ({ ...m, position: idx }));
+      return { ...section, modules: updatedMods };
+    });
+
+    // ✅ Set state with the computed value directly (no functional-updater needed)
+    setDocumentSections(updated);
+
+    // ✅ Save immediately — `updated` is always defined here
+    await waitForPendingSave();
+    const saveRes = await autoSaveDraft(updated);
+    if (!saveRes?.success) showToast("Warning: module order may not be saved");
+
+  } catch (err) {
+    console.warn("onModuleDrop parse failed:", err);
+  }
+};
 
   const handleDrop = async (event: React.DragEvent) => {
     event.preventDefault();
@@ -1293,7 +1415,11 @@ const handlePreview = async () => {
               description: sourceSection.description, 
               position: Number.isFinite(Number(sourceSection.position)) ? Number(sourceSection.position) : undefined, 
               modules: [{ 
-                ...module, 
+                ...module,
+                // ✅ Set position for module to track order
+                position: 0,
+                // ✅ Ensure canEdit is preserved when re-adding
+                canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : true,
                 instanceId: `${module.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`
               }] 
             }],
@@ -1310,7 +1436,11 @@ const handlePreview = async () => {
               ? { 
                   ...section, 
                   modules: [...section.modules, { 
-                    ...module, 
+                    ...module,
+                    // ✅ Set position to end of modules array
+                    position: (section.modules || []).length,
+                    // ✅ Ensure canEdit is preserved when re-adding
+                    canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : true,
                     instanceId: `${module.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`
                   }] 
                 }

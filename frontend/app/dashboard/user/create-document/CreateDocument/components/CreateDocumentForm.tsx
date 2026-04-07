@@ -105,7 +105,7 @@ export default function CreateDocumentForm({ userId, onClose }: FormProps) {
     setSubmitting(true);
    const fileName =  partnerName && partnerName.trim()  
                   ? `${opeId} - HPE Nonstop PSD SOW to ${partnerName} for ${customerName}_draft_v1.docx`
-                  : `${opeId} - HPE Nonstop PSD SOW for ${customerName}_draft_v1.docx`;
+                  : `${opeId} - HPE Nonstop PSD SOW to ${customerName}_draft_v1.docx`;
 
     try {
       const payload = {
