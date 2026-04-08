@@ -25,7 +25,7 @@ interface Module {
   sectionId: number;
   canEdit: boolean;
   position?: number;
-  instanceId?: string; // ✅ Unique ID for each instance (allows duplicates)
+  instanceId?: string;
 }
 
 interface Section {
@@ -131,9 +131,21 @@ export default function CreateDocumentContent() {
   const sowTypeChangeInProgressRef = useRef(false);
   const skipDraftReloadRef = useRef(false);
   const initialDraftLoadedRef = useRef(false);
-  const dataFetchedAfterLoadRef = useRef(false);  // ✅ Prevent infinite fetch loop
-  const savingPromiseRef = useRef<Promise<any> | null>(null);  // ✅ Track in-flight save operations
-const customerNoInitialMount = useRef(true);
+  const dataFetchedAfterLoadRef = useRef(false);
+  const savingPromiseRef = useRef<Promise<any> | null>(null);
+  const customerNoInitialMount = useRef(true);
+
+  // ── FIX 1: Hydration guard — prevents localStorage sync from firing before
+  //    state has been populated from localStorage on first mount ────────────────
+  const isHydratedRef = useRef(false);
+
+  // ── FIX 3: Always-current refs for partner fields so autoSaveDraft never
+  //    captures a stale closure value ──────────────────────────────────────────
+  const contractingPartyRef = useRef(contractingParty);
+  useEffect(() => { contractingPartyRef.current = contractingParty; }, [contractingParty]);
+
+  const partnerNameRef = useRef(partnerName);
+  useEffect(() => { partnerNameRef.current = partnerName; }, [partnerName]);
 
   // ─── Helper to check if section/module matches current SoW type ─────────────────
 
@@ -176,8 +188,6 @@ const customerNoInitialMount = useRef(true);
     [modules, sections, sowSize]
   );
 
-  // ✅ Recompute sections with synced modules for each sowType
-  // This ensures when sowSize changes, each section shows the correct modules
   const visibleSectionsWithModules = React.useMemo(
     () => visibleSections.map((section) => ({
       ...section,
@@ -221,7 +231,6 @@ const customerNoInitialMount = useRef(true);
     }
   };
 
-  /** Build a document name from SoW type, version, and status */
   const generateDocumentName = (
     type: "full" | "small" | "proposal",
     versionNumber: number,
@@ -237,21 +246,14 @@ const customerNoInitialMount = useRef(true);
     docSections: DocumentSection[],
     sourceSections: Section[]
   ) => {
-    // ✅ Use documentSections positions as primary (user's manual ordering)
-    // Only use source positions if documentSection doesn't have one set
     const pos = new Map<number, number>();
-    
-    // First, map source positions for reference
     const sourcePos = new Map(
       (sourceSections || []).map((s, i) => {
         const p = Number(s.position);
         return [s.id, Number.isFinite(p) ? p : i];
       })
     );
-    
-    // Then, use documentSections positions (user's ordering in document)
     (docSections || []).forEach((doc, idx) => {
-      // Preserve the position from documentSections if set, otherwise use source or index
       const docPos = Number(doc.position);
       if (Number.isFinite(docPos)) {
         pos.set(doc.id, docPos);
@@ -261,7 +263,6 @@ const customerNoInitialMount = useRef(true);
         pos.set(doc.id, idx);
       }
     });
-    
     return [...docSections]
       .sort((a, b) => (pos.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.id) ?? Number.MAX_SAFE_INTEGER))
       .map((s) => ({ ...s, position: pos.get(s.id) ?? s.position }));
@@ -384,58 +385,63 @@ const customerNoInitialMount = useRef(true);
   }, [sections, documentSections, builderMinHeight]);
 
   useEffect(() => {
-  // ✅ Skip the first render — localStorage init hasn't hydrated yet
-  if (customerNoInitialMount.current) {
-    customerNoInitialMount.current = false;
-    return;
-  }
-  if (!customerNo) {
-    // User explicitly cleared the field — clear the name too
-    setCustomerName("");
-    setErrors((prev) => { const { customerNo: _, ...rest } = prev; return rest; });
-    return;
-  }
-  if (customerNoDebounceRef.current) clearTimeout(customerNoDebounceRef.current);
-  customerNoDebounceRef.current = setTimeout(() => {
-    fetchCustomerDetails().catch((e) => console.warn("Debounced fetchCustomer failed:", e));
-  }, 600);
-  return () => { if (customerNoDebounceRef.current) clearTimeout(customerNoDebounceRef.current); };
-}, [customerNo]);
-
-  /** Init from localStorage */
-useEffect(() => {
-  if (typeof window === "undefined") return;
-  try {
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
-    const currentOpeId = localStorage.getItem("currentOpeId") || "";
-    const customerInfo = JSON.parse(localStorage.getItem("customerInfo") || "{}");
-    setUserId(user?.id || 1);
-    setUserNameDb(user?.name || user?.email || "User");
-    setUsername(user?.name || user?.email || "User");
-    setUserEmail(user?.email || "");
-    setOpeId(currentOpeId);
-    setNewOpeId(currentOpeId);
-    setCustomerName(customerInfo?.customerName || "");
-    setCustomerNo(customerInfo?.customerNo || "");
-    const partnerValue = customerInfo?.partnerName || customerInfo?.contractingParty || "";
-    setContractingParty(partnerValue);
-    setPartnerName(partnerValue);
-
-    // ✅ If we have a stored customerNo, fetch fresh name from server immediately
-    // This ensures the label shows the live name, not just the cached one
-    if (customerInfo?.customerNo) {
-      apiFetch(`/customer/${customerInfo.customerNo}`)
-        .then((data) => {
-          if (data?.success && data?.customer) {
-            setCustomerName(data.customer.customerName);
-          }
-        })
-        .catch(() => {
-          // Silently fall back to cached customerName from localStorage
-        });
+    if (customerNoInitialMount.current) {
+      customerNoInitialMount.current = false;
+      return;
     }
-  } catch (e) { console.error("localStorage init error:", e); }
-}, []);
+    if (!customerNo) {
+      setCustomerName("");
+      setErrors((prev) => { const { customerNo: _, ...rest } = prev; return rest; });
+      return;
+    }
+    if (customerNoDebounceRef.current) clearTimeout(customerNoDebounceRef.current);
+    customerNoDebounceRef.current = setTimeout(() => {
+      fetchCustomerDetails().catch((e) => console.warn("Debounced fetchCustomer failed:", e));
+    }, 600);
+    return () => { if (customerNoDebounceRef.current) clearTimeout(customerNoDebounceRef.current); };
+  }, [customerNo]);
+
+  // ── FIX 1: localStorage init — set isHydratedRef AFTER all state is set
+  //    so the sync effect below cannot fire with empty values first ────────────
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const currentOpeId = localStorage.getItem("currentOpeId") || "";
+      const customerInfo = JSON.parse(localStorage.getItem("customerInfo") || "{}");
+      setUserId(user?.id || 1);
+      setUserNameDb(user?.name || user?.email || "User");
+      setUsername(user?.name || user?.email || "User");
+      setUserEmail(user?.email || "");
+      setOpeId(currentOpeId);
+      setNewOpeId(currentOpeId);
+      setCustomerName(customerInfo?.customerName || "");
+      setCustomerNo(customerInfo?.customerNo || "");
+
+      // ── Restore partner / contracting party from localStorage ──────────────
+      const partnerValue = customerInfo?.partnerName || customerInfo?.contractingParty || "";
+      setContractingParty(partnerValue);
+      setPartnerName(partnerValue);
+      // Keep refs in sync immediately so autoSaveDraft can use them right away
+      contractingPartyRef.current = partnerValue;
+      partnerNameRef.current = partnerValue;
+
+      if (customerInfo?.customerNo) {
+        apiFetch(`/customer/${customerInfo.customerNo}`)
+          .then((data) => {
+            if (data?.success && data?.customer) {
+              setCustomerName(data.customer.customerName);
+            }
+          })
+          .catch(() => {});
+      }
+    } catch (e) { console.error("localStorage init error:", e); }
+
+    // ── Mark hydration complete AFTER all setters have been called ──────────
+    // Using a microtask delay ensures React has flushed the state updates
+    // before the sync effect is allowed to write back to localStorage.
+    Promise.resolve().then(() => { isHydratedRef.current = true; });
+  }, []);
 
   /** Reload if URL opeId mismatches state */
   useEffect(() => {
@@ -461,15 +467,14 @@ useEffect(() => {
     return () => window.removeEventListener("storage", syncUser);
   }, []);
 
-  /** Fetch sections/modules on mount and when sowSize changes */
-  /** But SKIP the initial call on first mount - wait for draft to load to get the actual sowType */
+  /** Fetch sections/modules when sowSize changes (skip until draft loaded) */
   useEffect(() => {
-    if (!initialDraftLoadedRef.current) return;  // ✅ Skip initial call until draft is loaded
-    dataFetchedAfterLoadRef.current = false;  // ✅ Allow data fetch after sowSize changes
+    if (!initialDraftLoadedRef.current) return;
+    dataFetchedAfterLoadRef.current = false;
     fetchData();
   }, [sowSize]);
 
-  /** Load draft when opeId or modules change (skip during sow-type switch) */
+  /** Load draft when opeId changes */
   useEffect(() => {
     if (!opeId || sowTypeChangeInProgressRef.current) return;
     if (skipDraftReloadRef.current) {
@@ -479,8 +484,6 @@ useEffect(() => {
     const loadDraftForOpe = async () => {
       setLoading(true);
       try {
-        // ✅ Don't specify sowType on first load - get whatever was last saved
-        // This ensures we load the ACTUAL saved sowType, not assume it based on current state
         const res = await apiFetch(`/drafts/${opeId}`);
         const draft = res?.draft;
         let pending = null;
@@ -499,22 +502,40 @@ useEffect(() => {
                 id: m.id,
                 name: m.name ?? full?.name ?? "",
                 description: m.description ?? full?.description ?? "",
-                // ✅ Preserve saved canEdit from draft, then check source, default to false
                 canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : (typeof full?.canEdit !== "undefined" ? full.canEdit : false),
                 sectionId: sec.id,
-                // ✅ Use saved position if available, otherwise use array index for consistency
                 position: typeof m.position !== "undefined" ? m.position : idx,
-                // ✅ Generate unique instanceId for loaded modules (prevents duplicate key errors)
                 instanceId: m.instanceId || `${m.id}_${sec.id}_${Math.random().toString(36).substring(7)}`,
               };
             }),
           }));
 
           setDocumentSections(mergedSections);
-          // ✅ Only set customer info from draft if it has non-empty values
-          // Otherwise preserve values loaded from localStorage in the init effect
           if (source.customerName) setCustomerName(source.customerName);
-          if (source.partnerName) setPartnerName(source.partnerName);
+
+          // ── FIX 2: Restore partner/contractingParty from draft ─────────────
+          // Use null-check (not falsy) so we distinguish "absent" from "empty".
+          // If the draft has the field (even as ""), prefer draft over localStorage
+          // because the user may have deliberately cleared it.
+          // If the field is truly absent from the draft (undefined/null AND no
+          // prior localStorage value), keep whatever localStorage already set.
+          const draftPartner =
+            source.partnerName !== undefined && source.partnerName !== null
+              ? source.partnerName
+              : source.contractingParty !== undefined && source.contractingParty !== null
+              ? source.contractingParty
+              : null; // null means "not stored in draft — keep localStorage value"
+
+          if (draftPartner !== null) {
+            setContractingParty(draftPartner);
+            setPartnerName(draftPartner);
+            // Keep refs in sync immediately
+            contractingPartyRef.current = draftPartner;
+            partnerNameRef.current = draftPartner;
+          }
+          // If draftPartner === null, the localStorage-init effect already set the
+          // correct value; we leave it untouched.
+
           if (source.quoteId) setQuoteId(source.quoteId);
 
           const loadedSowType =
@@ -535,23 +556,20 @@ useEffect(() => {
             localStorage.removeItem("pendingDraft");
           } catch (err) { console.warn("Failed to flush pendingDraft:", err); }
         }
-        
-        // ✅ Mark initial draft load as complete 
+
         initialDraftLoadedRef.current = true;
-        
-        // ✅ If this is the initial load and sowSize won't change, fetch data now
+
         const fetchSowType =
           source?.sowType === "SMALL" ? "small" : source?.sowType === "PROPOSAL" ? "proposal" : "full";
         if (!dataFetchedAfterLoadRef.current) {
           dataFetchedAfterLoadRef.current = true;
-          // Schedule fetch after state updates complete
           setTimeout(() => fetchData(fetchSowType), 0);
         }
       } catch (err) { console.warn("Failed to load draft:", opeId, err); }
       finally { setLoading(false); }
     };
     loadDraftForOpe();
-  }, [opeId]);  // ✅ Removed modules - prevents infinite loop
+  }, [opeId]);
 
   /** Auto-format document name when opeId / customerName / contractingParty changes */
   useEffect(() => {
@@ -597,7 +615,7 @@ useEffect(() => {
     if (!same) setDocumentSections(sorted);
   }, [sections]);
 
-  /** Auto-action from sessionStorage (e.g. preview/generate after reload) */
+  /** Auto-action from sessionStorage */
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem("autoAction");
@@ -618,27 +636,22 @@ useEffect(() => {
     return () => clearTimeout(t);
   }, [loading, documentSections]);
 
-  /** Sync customerInfo to localStorage */
+  // ── FIX 1 (continued): Guard localStorage sync with isHydratedRef ────────────
+  // This prevents the effect from running with empty state on first render
+  // and overwriting the persisted customerInfo (including contractingParty).
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (!isHydratedRef.current) return; // ← Do not write until hydration is complete
     if (!customerName && !customerNo && !contractingParty && !partnerName) return;
     try {
       localStorage.setItem("customerInfo", JSON.stringify({
-        customerName, customerNo,
+        customerName,
+        customerNo,
         partnerName: contractingParty || partnerName,
         contractingParty: contractingParty || partnerName,
       }));
     } catch (e) { console.error("localStorage sync error:", e); }
   }, [customerName, customerNo, contractingParty, partnerName]);
-
-  /** Debounce customerNo → fetchCustomerDetails */
-  useEffect(() => {
-    if (customerNoDebounceRef.current) clearTimeout(customerNoDebounceRef.current);
-    customerNoDebounceRef.current = setTimeout(() => {
-      fetchCustomerDetails().catch((e) => console.warn("Debounced fetchCustomer failed:", e));
-    }, 600);
-    return () => { if (customerNoDebounceRef.current) clearTimeout(customerNoDebounceRef.current); };
-  }, [customerNo]);
 
   /** Prevent accidental close while saving */
   useEffect(() => {
@@ -663,32 +676,30 @@ useEffect(() => {
         apiFetch(`/sections/all?docType=${docType}`),
         apiFetch("/modules"),
       ]);
-      
+
       console.log(`[fetchData] docType=${docType}, sections returned:`, sectionsRes?.length || 0, "modules returned:", modulesRes?.length || 0);
-      
+
       const normalizedModules = (modulesRes || []).map((m) => ({
         ...m,
         sectionId: m.sectionId || m.section_id,
         position: Number.isFinite(Number(m.position)) ? Number(m.position)
           : Number.isFinite(Number(m.sortOrder)) ? Number(m.sortOrder) : undefined,
-        // ✅ Ensure canEdit is always set (default to true for user-editable modules)
         canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : true,
       }));
       const normalizedSections = (sectionsRes || [])
         .map((s, idx) => {
           const p = Number(s.position ?? s.sortOrder);
-          // ✅ Explicitly ensure docType is set (fallback to docType from query if missing)
-          return { 
-            ...s, 
-            docType: s.docType || docType,  // Fallback to query param if field is missing
-            position: Number.isFinite(p) ? p : idx, 
-            modules: normalizedModules.filter((m) => m.sectionId === s.id) 
+          return {
+            ...s,
+            docType: s.docType || docType,
+            position: Number.isFinite(p) ? p : idx,
+            modules: normalizedModules.filter((m) => m.sectionId === s.id)
           };
         })
         .sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER));
-      
+
       console.log(`[fetchData] normalized ${normalizedSections.length} sections`, normalizedSections);
-      
+
       setSections(normalizedSections);
       setModules(normalizedModules);
     } catch {
@@ -703,21 +714,19 @@ useEffect(() => {
         apiFetch(`/sections/all?docType=${docType}`),
         apiFetch("/modules"),
       ]);
-      const normalizedModules = (modulesRes || []).map((m) => ({ 
-        ...m, 
+      const normalizedModules = (modulesRes || []).map((m) => ({
+        ...m,
         sectionId: m.sectionId || m.section_id,
-        // ✅ Ensure canEdit is always set (default to true for user-editable modules)
         canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : true,
       }));
       const normalizedSections = (sectionsRes || [])
         .map((s, idx) => {
           const p = Number(s.position);
-          // ✅ Explicitly ensure docType is set (fallback to docType from query if missing)
-          return { 
-            ...s, 
-            docType: s.docType || docType,  // Fallback to query param if field is missing
-            position: Number.isFinite(p) ? p : idx, 
-            modules: normalizedModules.filter((m) => m.sectionId === s.id) 
+          return {
+            ...s,
+            docType: s.docType || docType,
+            position: Number.isFinite(p) ? p : idx,
+            modules: normalizedModules.filter((m) => m.sectionId === s.id)
           };
         })
         .sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER));
@@ -746,7 +755,6 @@ useEffect(() => {
       }
       if (opeId) {
         try {
-          // ✅ Don't specify sowType - fetch the actual saved draft
           const draftRes = await apiFetch(`/drafts/${opeId}`);
           const source = draftRes?.draft;
           if (source?.content && Array.isArray(source.content.documentSections)) {
@@ -756,10 +764,8 @@ useEffect(() => {
                 const full = modules.find((x) => String(x.id) === String(m.id));
                 return {
                   id: m.id, name: m.name ?? full?.name ?? "", description: m.description ?? full?.description ?? "",
-                  // ✅ Preserve saved canEdit from draft, then check source, default to false
                   canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : (typeof full?.canEdit !== "undefined" ? full.canEdit : false),
                   sectionId: sec.id, position: full?.position ?? m.position,
-                  // ✅ Generate unique instanceId for loaded modules (prevents duplicate key errors)
                   instanceId: m.instanceId || `${m.id}_${sec.id}_${Math.random().toString(36).substring(7)}`,
                 };
               }),
@@ -771,25 +777,21 @@ useEffect(() => {
     } catch (err) { console.warn("syncFromServer failed:", err); }
   };
 
-const fetchCustomerDetails = async (forceNo?: string) => {
-  const no = forceNo ?? customerNo;
-  if (!no) {
-    // ✅ Only clear if user explicitly blanked the field (not on init)
-    // Don't wipe customerName on mount before localStorage has hydrated
-    return;
-  }
-  try {
-    const data = await apiFetch(`/customer/${no}`);
-    if (data.success && data.customer) {
-      setCustomerName(data.customer.customerName);
-      setErrors((prev) => { const { customerNo: _, ...rest } = prev; return rest; });
-    } else {
-      setErrors((prev) => ({ ...prev, customerNo: "Customer not found" }));
+  const fetchCustomerDetails = async (forceNo?: string) => {
+    const no = forceNo ?? customerNo;
+    if (!no) return;
+    try {
+      const data = await apiFetch(`/customer/${no}`);
+      if (data.success && data.customer) {
+        setCustomerName(data.customer.customerName);
+        setErrors((prev) => { const { customerNo: _, ...rest } = prev; return rest; });
+      } else {
+        setErrors((prev) => ({ ...prev, customerNo: "Customer not found" }));
+      }
+    } catch {
+      setErrors((prev) => ({ ...prev, customerNo: "Failed to fetch customer details" }));
     }
-  } catch {
-    setErrors((prev) => ({ ...prev, customerNo: "Failed to fetch customer details" }));
-  }
-};
+  };
 
   // ─── Auto Save ───────────────────────────────────────────────────────────────
 
@@ -801,14 +803,12 @@ const fetchCustomerDetails = async (forceNo?: string) => {
       } catch (e) {
         console.warn("Pending save failed, continuing:", e);
       }
-      // Re-check if still pending
       if (!savingPromiseRef.current) break;
       await new Promise(r => setTimeout(r, 100));
     }
   };
 
   const autoSaveDraft = async (newDocumentSections = documentSections, explicitSowType = null) => {
-    // ✅ Wait for any in-flight save to complete before starting a new one
     if (savingPromiseRef.current) {
       console.debug("autoSaveDraft: waiting for pending save...");
       try {
@@ -817,33 +817,32 @@ const fetchCustomerDetails = async (forceNo?: string) => {
         console.warn("Previous save failed, continuing:", e);
       }
     }
-    
-    if (isSaving || autoSaveInProgress) { 
-      console.debug("autoSaveDraft: already in progress, skipping"); 
-      return; 
+
+    if (isSaving || autoSaveInProgress) {
+      console.debug("autoSaveDraft: already in progress, skipping");
+      return;
     }
-    
-    // ✅ Create and store the save promise so other operations can wait for it
+
     const savePromise = (async () => {
       setIsSaving(true);
       setAutoSaveInProgress(true);
       try {
         const normalizedSections = (newDocumentSections || []).map((section) => ({
-        id: section.id,
-        title: section.title || "",
-        description: section.description || "",
-        position: section.position,
-        modules: (section.modules || []).map((module) => ({
-          id: module.id,
-          name: module.name || "",
-          description: sanitizeDescription(normalizeInlineLists(module.description || "")),
-          sectionId: section.id,
-          position: module.position,
-          canEdit: module.canEdit, // ✅ Include canEdit to preserve editability
-        })),
-      }));
+          id: section.id,
+          title: section.title || "",
+          description: section.description || "",
+          position: section.position,
+          modules: (section.modules || []).map((module) => ({
+            id: module.id,
+            name: module.name || "",
+            description: sanitizeDescription(normalizeInlineLists(module.description || "")),
+            sectionId: section.id,
+            position: module.position,
+            canEdit: module.canEdit,
+          })),
+        }));
 
-      const storedUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("user") || "{}") : {};
+        const storedUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("user") || "{}") : {};
         const storedOpe = typeof window !== "undefined" ? (localStorage.getItem("currentOpeId") || "") : "";
         const effectiveUserId = userId || storedUser?.id || null;
         const effectiveOpeId = opeId || storedOpe || null;
@@ -852,19 +851,25 @@ const fetchCustomerDetails = async (forceNo?: string) => {
         const sowTypeStr =
           effectiveSowType === "small" ? "SMALL" : effectiveSowType === "proposal" ? "PROPOSAL" : "FULL";
 
+        // ── FIX 3: Use refs instead of closure values for partner fields ──────
+        // React closures in async functions capture state at call-time, which
+        // may be stale if multiple renders happened since the function was created.
+        // Refs always point to the latest value regardless of closure timing.
+        const currentContractingParty = contractingPartyRef.current;
+        const currentPartnerName = partnerNameRef.current;
+
         const draftData = {
           opeId: effectiveOpeId,
           userId: effectiveUserId,
           customerName,
           customerNo,
-          contractingParty: contractingParty || null,
-          partnerName: contractingParty || partnerName || null,
+          contractingParty: currentContractingParty || null,
+          partnerName: currentContractingParty || currentPartnerName || null,
           documentName,
           quoteId: quoteId || null,
           content: { documentSections: normalizedSections },
           sowType: sowTypeStr,
           status: "draft",
-          // ✅ Don't send version - backend finds and updates latest version
         };
 
         if (!effectiveOpeId || !effectiveUserId) {
@@ -894,12 +899,10 @@ const fetchCustomerDetails = async (forceNo?: string) => {
         setIsSaving(false); setAutoSaveInProgress(false);
         return { success: false, error: error?.message || error };
       } finally {
-        // ✅ Clear the promise ref when save completes
         savingPromiseRef.current = null;
       }
     })();
-    
-    // ✅ Store promise so other operations can wait for this save
+
     savingPromiseRef.current = savePromise;
     return savePromise;
   };
@@ -923,18 +926,17 @@ const fetchCustomerDetails = async (forceNo?: string) => {
     if (!pendingSowType) return;
     const newType = pendingSowType;
     const oldSowType = sowSize.toUpperCase();
-    
+
     try {
-      // Delete all records for old SoW type to start fresh
       const deleteRes = await apiFetch(`/drafts/delete-all/${opeId}/${oldSowType}`, {
         method: "DELETE"
       });
-      
+
       if (!deleteRes.success) {
         showToast("Failed to clear previous SoW data");
         return;
       }
-      
+
       sowTypeChangeInProgressRef.current = true;
       skipDraftReloadRef.current = true;
       setShowSowTypeWarning(false);
@@ -943,7 +945,7 @@ const fetchCustomerDetails = async (forceNo?: string) => {
       setDocumentSections([]);
       setSections([]);
       setModules([]);
-      
+
       await autoSaveDraft([], newType);
       await refreshSourceLists(newType);
       showToast(`Switched to ${newType === "full" ? "Full" : newType === "small" ? "Short" : "Proposal"} SoW`);
@@ -1021,7 +1023,6 @@ const fetchCustomerDetails = async (forceNo?: string) => {
       const saveResult = await autoSaveDraft(updatedSections);
       if (saveResult?.success) {
         setDocumentSections(updatedSections);
-        // ✅ Also update the source modules array so sidebar and merge effect stay in sync
         setModules((prev) =>
           prev.map((m) =>
             m.id === editingModule?.id
@@ -1050,15 +1051,11 @@ const fetchCustomerDetails = async (forceNo?: string) => {
     setDocumentSections((prev) => {
       const updated = prev.map((section) => {
         if (section.id !== sectionId) return section;
-        // ✅ Remove only the FIRST instance of this module (allows duplicates)
         let removed = false;
         return {
           ...section,
           modules: section.modules.filter((m) => {
-            if (!removed && m.id === moduleId) {
-              removed = true;
-              return false; // Remove this one instance
-            }
+            if (!removed && m.id === moduleId) { removed = true; return false; }
             return true;
           }),
         };
@@ -1071,134 +1068,117 @@ const fetchCustomerDetails = async (forceNo?: string) => {
 
   // ─── Preview ─────────────────────────────────────────────────────────────────
 
-const handlePreview = async () => {
-  setPreviewLoading(true);
-  setPreviewFileType("pdf"); // default
-  try {
-    const vars = { customerName, partnerName, documentName, opeId };
-    const isProposal = sowSize === "proposal";
+  const handlePreview = async () => {
+    setPreviewLoading(true);
+    setPreviewFileType("pdf");
+    try {
+      const vars = { customerName, partnerName, documentName, opeId };
+      const isProposal = sowSize === "proposal";
 
-    const payload = {
-      customerName, customerEmail: "", customerAddress: "", contractingParty, partnerName,
-      quoteId, documentTitle: documentName,
-      sowType: sowSize === "small" ? "SMALL" : sowSize === "proposal" ? "PROPOSAL" : "FULL",
-      status: "draft",
-      createdAtFormatted: formatDateOnly(new Date()),
-      sections: documentSections.map((s) => ({
-        id: s.id,
-        title: replaceTags(s.title, vars),
-        description: replaceTags(s.description || "", vars),
-      })),
-      assigned: documentSections.reduce((acc, s) => {
-        acc[s.id] = s.modules.map((m) => ({
-          id: m.id,
-          name: replaceTags(m.name, vars),
-          description: replaceTags(m.description, vars),
-          sectionId: s.id,
-        }));
-        return acc;
-      }, {}),
-    };
+      const payload = {
+        customerName, customerEmail: "", customerAddress: "", contractingParty, partnerName,
+        quoteId, documentTitle: documentName,
+        sowType: sowSize === "small" ? "SMALL" : sowSize === "proposal" ? "PROPOSAL" : "FULL",
+        status: "draft",
+        createdAtFormatted: formatDateOnly(new Date()),
+        sections: documentSections.map((s) => ({
+          id: s.id,
+          title: replaceTags(s.title, vars),
+          description: replaceTags(s.description || "", vars),
+        })),
+        assigned: documentSections.reduce((acc, s) => {
+          acc[s.id] = s.modules.map((m) => ({
+            id: m.id,
+            name: replaceTags(m.name, vars),
+            description: replaceTags(m.description, vars),
+            sectionId: s.id,
+          }));
+          return acc;
+        }, {}),
+      };
 
-    if (isProposal) {
-      // Proposal → backend converts PPTX to PDF for preview (when ?preview=true)
-      const endpoint = `/proposal/${opeId}?preview=true`;
-      try {
+      if (isProposal) {
+        const endpoint = `/proposal/${opeId}?preview=true`;
+        try {
+          const response = await apiFetch(endpoint, {
+            method: "POST",
+            body: JSON.stringify(payload),
+            headers: { "Content-Type": "application/json" },
+            responseType: "blob",
+          });
+
+          if (!response || response.size === 0) {
+            showToast("Failed to generate proposal preview - empty response");
+            return;
+          }
+
+          const pdfUrl = window.URL.createObjectURL(new Blob([response], { type: "application/pdf" }));
+          setPreviewFileType("pdf");
+          setPreviewPdfUrl(pdfUrl);
+          setShowPreview(true);
+        } catch (fetchErr) {
+          console.error("Failed to fetch proposal preview:", fetchErr);
+          showToast("Failed to fetch proposal preview");
+        }
+      } else {
+        const endpoint = `/generate-document/${opeId}?type=docx&preview=true`;
         const response = await apiFetch(endpoint, {
           method: "POST",
           body: JSON.stringify(payload),
           headers: { "Content-Type": "application/json" },
           responseType: "blob",
         });
-        
-        if (!response || response.size === 0) {
-          console.warn("handlePreview: Empty or null proposal response from endpoint");
-          showToast("Failed to generate proposal preview - empty response");
-          return;
-        }
-        
-        try {
-          // Backend returns PDF for ?preview=true
-          const pdfUrl = window.URL.createObjectURL(
-            new Blob([response], { type: "application/pdf" })
-          );
-          setPreviewFileType("pdf");
-          setPreviewPdfUrl(pdfUrl);
-          setShowPreview(true);
-        } catch (blobErr) {
-          console.error("Failed to create PDF blob URL:", blobErr);
-          showToast("Failed to create proposal preview URL");
-        }
-      } catch (fetchErr) {
-        console.error("Failed to fetch proposal preview:", fetchErr);
-        showToast("Failed to fetch proposal preview");
-      }
-    } else {
-      // SoW/DOCX → backend returns DOCX, convert to PDF with TOC on Electron
-      const endpoint = `/generate-document/${opeId}?type=docx&preview=true`;
-      const response = await apiFetch(endpoint, {
-        method: "POST",
-        body: JSON.stringify(payload),
-        headers: { "Content-Type": "application/json" },
-        responseType: "blob",
-      });
 
-      if (response && response.size > 0) {
-        // ✅ Electron: convert DOCX → PDF with TOC for preview
-        if (isElectronEnv() && (window as any).electronAPI?.processDOCXAndGeneratePDF) {
-          try {
-            const base64 = await blobToBase64(response);
-            const fileName = `preview_${Date.now()}.docx`;
-            const result = await (window as any).electronAPI.processDOCXAndGeneratePDF({
-              base64,
-              fileName,
-            });
+        if (response && response.size > 0) {
+          if (isElectronEnv() && (window as any).electronAPI?.processDOCXAndGeneratePDF) {
+            try {
+              const base64 = await blobToBase64(response);
+              const fileName = `preview_${Date.now()}.docx`;
+              const result = await (window as any).electronAPI.processDOCXAndGeneratePDF({ base64, fileName });
 
-            if (result?.success && result.pdfPath) {
-              const fileUrl = `file:///${result.pdfPath.replace(/\\/g, "/")}`;
-              setPreviewFileType("pdf");
-              setPreviewPdfUrl(fileUrl);
-              setShowPreview(true);
-            } else {
-              // Fallback: display DOCX as blob if conversion fails
+              if (result?.success && result.pdfPath) {
+                const fileUrl = `file:///${result.pdfPath.replace(/\\/g, "/")}`;
+                setPreviewFileType("pdf");
+                setPreviewPdfUrl(fileUrl);
+                setShowPreview(true);
+              } else {
+                const docxUrl = window.URL.createObjectURL(
+                  new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
+                );
+                setPreviewFileType("docx");
+                setPreviewPdfUrl(docxUrl);
+                setShowPreview(true);
+                showToast("Preview: Showing DOCX (TOC conversion failed)");
+              }
+            } catch (electronErr) {
+              console.warn("Electron API error:", electronErr);
               const docxUrl = window.URL.createObjectURL(
                 new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
               );
               setPreviewFileType("docx");
               setPreviewPdfUrl(docxUrl);
               setShowPreview(true);
-              showToast("Preview: Showing DOCX (TOC conversion failed)");
+              showToast("Preview: Showing DOCX (Electron unavailable)");
             }
-          } catch (electronErr) {
-            // Fallback: display DOCX as blob if Electron API fails
-            console.warn("Electron API error:", electronErr);
+          } else {
             const docxUrl = window.URL.createObjectURL(
               new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
             );
             setPreviewFileType("docx");
             setPreviewPdfUrl(docxUrl);
             setShowPreview(true);
-            showToast("Preview: Showing DOCX (Electron unavailable)");
           }
         } else {
-          // Non-Electron or API not available: display DOCX as blob
-          const docxUrl = window.URL.createObjectURL(
-            new Blob([response], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
-          );
-          setPreviewFileType("docx");
-          setPreviewPdfUrl(docxUrl);
-          setShowPreview(true);
+          showToast("Failed to generate preview");
         }
-      } else {
-        showToast("Failed to generate preview");
       }
+    } catch (error) {
+      console.error("Preview error:", error);
+      showToast("Failed to generate preview");
     }
-  } catch (error) {
-    console.error("Preview error:", error);
-    showToast("Failed to generate preview");
-  }
-  setPreviewLoading(false);
-};
+    setPreviewLoading(false);
+  };
+
   // ─── Generate ────────────────────────────────────────────────────────────────
 
   const handleGenerate = async (type: string, status: "draft" | "final") => {
@@ -1209,7 +1189,6 @@ const handlePreview = async () => {
         status === "final" ? `/finals?opeId=${opeId}&userId=${userId}` : `/drafts?opeId=${opeId}&userId=${userId}`
       );
       const allVersions = (status === "final" ? versionsRes?.finals : versionsRes?.drafts) || [];
-      // ✅ Only count generated versions (version > 0) for calculating nextVersion
       const generatedVersions = allVersions.filter((v) => (v.version || 0) > 0);
       const nextVersion = (generatedVersions.length > 0 ? generatedVersions[generatedVersions.length - 1].version : 0) + 1;
 
@@ -1222,7 +1201,6 @@ const handlePreview = async () => {
       const fileName = `${formattedBase}.${fileExt}`;
       setDocumentName(formattedBase);
 
-      const vars = { customerName, partnerName, documentName, opeId };
       const sowTypeStr = sowSize === "small" ? "SMALL" : sowSize === "proposal" ? "PROPOSAL" : "FULL";
 
       const saveUrl = status === "final" ? "/finals" : "/drafts";
@@ -1269,15 +1247,13 @@ const handlePreview = async () => {
         setOpeId(validated);
         localStorage.setItem("currentOpeId", validated);
         showToast(response.message || "OPE ID updated successfully!");
-        // ✅ Don't specify sowType - fetch the actual saved draft for new OPE
         const draftRes = await apiFetch(`/drafts/${validated}`);
         if (draftRes?.draft) {
           setDocumentSections(draftRes.draft.content?.documentSections || []);
           setVersion(draftRes.draft.version || 0);
-          // ✅ Update sowSize based on loaded draft's sowType
-          const loadedSowType = 
-            draftRes.draft.sowType === "SMALL" ? "small" : 
-            draftRes.draft.sowType === "PROPOSAL" ? "proposal" : 
+          const loadedSowType =
+            draftRes.draft.sowType === "SMALL" ? "small" :
+            draftRes.draft.sowType === "PROPOSAL" ? "proposal" :
             "full";
           setSowSize(loadedSowType);
         }
@@ -1329,43 +1305,39 @@ const handlePreview = async () => {
     }, 10);
   };
 
-const onModuleDrop = async (e: React.DragEvent, targetSectionId: number, targetIndex: number) => {
-  e.preventDefault();
-  try {
-    const parsed = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
-    if (!parsed || parsed.type !== "MODULE" || !parsed.data) return;
-    const { sectionId: sourceSectionId, index: sourceIndex } = parsed.data;
-    if (Number(sourceSectionId) !== Number(targetSectionId)) return;
+  const onModuleDrop = async (e: React.DragEvent, targetSectionId: number, targetIndex: number) => {
+    e.preventDefault();
+    try {
+      const parsed = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
+      if (!parsed || parsed.type !== "MODULE" || !parsed.data) return;
+      const { sectionId: sourceSectionId, index: sourceIndex } = parsed.data;
+      if (Number(sourceSectionId) !== Number(targetSectionId)) return;
 
-    // ✅ FIX: compute updated sections eagerly using current documentSections
-    // instead of relying on the async state-setter closure to populate updatedForSave
-    const updated = documentSections.map((section) => {
-      if (section.id !== Number(sourceSectionId)) return section;
-      const mods = [...(section.modules || [])];
-      const src = Number(sourceIndex), tgt = Number(targetIndex);
-      if (src === tgt || src === tgt - 1) return section;
-      const [moved] = mods.splice(src, 1);
-      if (!moved) return section;
-      let insertAt = tgt;
-      if (src < tgt) insertAt = Math.max(0, tgt - 1);
-      if (insertAt > mods.length) insertAt = mods.length;
-      mods.splice(insertAt, 0, moved);
-      const updatedMods = mods.map((m, idx) => ({ ...m, position: idx }));
-      return { ...section, modules: updatedMods };
-    });
+      const updated = documentSections.map((section) => {
+        if (section.id !== Number(sourceSectionId)) return section;
+        const mods = [...(section.modules || [])];
+        const src = Number(sourceIndex), tgt = Number(targetIndex);
+        if (src === tgt || src === tgt - 1) return section;
+        const [moved] = mods.splice(src, 1);
+        if (!moved) return section;
+        let insertAt = tgt;
+        if (src < tgt) insertAt = Math.max(0, tgt - 1);
+        if (insertAt > mods.length) insertAt = mods.length;
+        mods.splice(insertAt, 0, moved);
+        const updatedMods = mods.map((m, idx) => ({ ...m, position: idx }));
+        return { ...section, modules: updatedMods };
+      });
 
-    // ✅ Set state with the computed value directly (no functional-updater needed)
-    setDocumentSections(updated);
+      setDocumentSections(updated);
 
-    // ✅ Save immediately — `updated` is always defined here
-    await waitForPendingSave();
-    const saveRes = await autoSaveDraft(updated);
-    if (!saveRes?.success) showToast("Warning: module order may not be saved");
+      await waitForPendingSave();
+      const saveRes = await autoSaveDraft(updated);
+      if (!saveRes?.success) showToast("Warning: module order may not be saved");
 
-  } catch (err) {
-    console.warn("onModuleDrop parse failed:", err);
-  }
-};
+    } catch (err) {
+      console.warn("onModuleDrop parse failed:", err);
+    }
+  };
 
   const handleDrop = async (event: React.DragEvent) => {
     event.preventDefault();
@@ -1396,12 +1368,8 @@ const onModuleDrop = async (e: React.DragEvent, targetSectionId: number, targetI
 
     if (dragData.type === "MODULE") {
       const { module, sectionId } = dragData.data;
-      
-      // ✅ If module object isn't provided, it's a REORDER operation (handled by onModuleDrop)
-      // Skip here and let onModuleDrop handle the reordering
-      if (!module) {
-        return;
-      }
+
+      if (!module) return;
 
       const freshSections2 = await refreshSourceLists();
       const sectionIndex = documentSections.findIndex((s) => s.id === sectionId);
@@ -1409,19 +1377,17 @@ const onModuleDrop = async (e: React.DragEvent, targetSectionId: number, targetI
         const sourceSection = (freshSections2 || sections).find((s) => s.id === sectionId);
         if (sourceSection) {
           const sorted2 = sortSectionsByPosition(
-            [...documentSections, { 
-              id: sourceSection.id, 
-              title: sourceSection.title, 
-              description: sourceSection.description, 
-              position: Number.isFinite(Number(sourceSection.position)) ? Number(sourceSection.position) : undefined, 
-              modules: [{ 
+            [...documentSections, {
+              id: sourceSection.id,
+              title: sourceSection.title,
+              description: sourceSection.description,
+              position: Number.isFinite(Number(sourceSection.position)) ? Number(sourceSection.position) : undefined,
+              modules: [{
                 ...module,
-                // ✅ Set position for module to track order
                 position: 0,
-                // ✅ Ensure canEdit is preserved when re-adding
                 canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : true,
                 instanceId: `${module.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`
-              }] 
+              }]
             }],
             freshSections2 || sections
           );
@@ -1433,16 +1399,14 @@ const onModuleDrop = async (e: React.DragEvent, targetSectionId: number, targetI
         const updatedSections = sortSectionsByPosition(
           documentSections.map((section) =>
             section.id === sectionId
-              ? { 
-                  ...section, 
-                  modules: [...section.modules, { 
+              ? {
+                  ...section,
+                  modules: [...section.modules, {
                     ...module,
-                    // ✅ Set position to end of modules array
                     position: (section.modules || []).length,
-                    // ✅ Ensure canEdit is preserved when re-adding
                     canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : true,
                     instanceId: `${module.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`
-                  }] 
+                  }]
                 }
               : section
           ),

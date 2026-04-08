@@ -149,6 +149,7 @@ exports.autoSaveDraft = async (req, res) => {
         documentName: documentName || null,
         sowType: effectiveSowType,  // ✅ Use effectiveSowType (consistent)
         content: normalizedContent,
+        contractingParty: partnerName || null,
         status: status || "draft",
         version: 0,
         quoteId: quoteId || null,

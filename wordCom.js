@@ -1,12 +1,17 @@
 /**
  * wordCom.js – BULLETPROOF VERSION
- * 
+ *
  * ✅ Ultimate fix for RPC_E_DISCONNECTED:
  * 1. Uses simpler ExportAsFixedFormat call (fewer parameters)
  * 2. Doesn't wait for return value (fire-and-forget pattern)
  * 3. Adds longer delays between operations (5 seconds)
  * 4. Wraps everything in timeout handler
  * 5. Skips closing document after export (let OS cleanup)
+ *
+ * ✅ Table auto-fit:
+ *    After TOC update, every table is auto-fitted to contents (wdAutoFitContent = 1)
+ *    immediately followed by auto-fit to window (wdAutoFitWindow = 2).
+ *    This ensures tables never overflow the page margins.
  */
 
 const { spawn } = require("child_process");
@@ -15,7 +20,194 @@ const fs = require("fs");
 const os = require("os");
 
 // ---------------------------------------------------------------------------
-// TOC-ONLY SCRIPT
+// TABLE AUTO-FIT HELPER BLOCK (reused in both scripts)
+// wdAutoFitContent = 1  →  shrink/expand columns to fit cell text
+// wdAutoFitWindow  = 2  →  then stretch the whole table to the page width
+// ---------------------------------------------------------------------------
+const TABLE_AUTOFIT_BLOCK = `
+  # ── Table auto-fit (BULLETPROOF) ────────────────────────────────────────
+  Write-Host "Auto-fitting tables ($($doc.Tables.Count) found)..."
+  if ($doc.Tables.Count -gt 0) {
+    $tableCount = 0
+    foreach ($tbl in $doc.Tables) {
+      try {
+        $tableCount++
+        Write-Host "  Processing table $($tableCount)..."
+        
+        # ✅ Step 1: AutoFit to content (wdAutoFitContent = 1)
+        Write-Host "    - Fitting columns to content..."
+        $tbl.AutoFitBehavior(1)
+        Start-Sleep -Milliseconds 200
+        
+        # ✅ Step 2: AutoFit to window (wdAutoFitWindow = 2)
+        Write-Host "    - Fitting table to window width..."
+        $tbl.AutoFitBehavior(2)
+        Start-Sleep -Milliseconds 200
+        
+        Write-Host "    - Table $($tableCount) auto-fit complete"
+        Start-Sleep -Milliseconds 100
+      } catch {
+        Write-Warning "Table $($tableCount) auto-fit failed: \$_"
+      }
+    }
+    
+    # ✅ Step 3: Refresh document
+    Write-Host "Refreshing document layout..."
+    Start-Sleep -Milliseconds 500
+    \$doc.Fields.Update() | Out-Null
+    Start-Sleep -Milliseconds 300
+    
+    # ✅ Step 4: Save changes
+    Write-Host "Saving auto-fit changes ($($tableCount) tables processed)..."
+    \$doc.Save()
+    Start-Sleep -Milliseconds 500
+  } else {
+    Write-Host "No tables found in document"
+  }
+  # ────────────────────────────────────────────────────────────────────────
+`;
+
+// ── AGGRESSIVE BLANK PAGE REMOVAL ───────────────────────────────────────
+const BLANK_PAGE_REMOVAL_BLOCK = `
+  Write-Host "Removing trailing blank pages..."
+  
+  # ✅ Method 1: Remove trailing empty paragraphs from END backwards
+  \$maxIterations = 30
+  \$iteration = 0
+  \$removed = 0
+  
+  while (\$iteration -lt \$maxIterations -and \$removed -lt 20) {
+    if (\$doc.Paragraphs.Count -le 0) { break }
+    
+    \$lastPara = \$doc.Paragraphs.Item(\$doc.Paragraphs.Count)
+    \$lastText = \$lastPara.Range.Text
+    
+    # Check if it's empty (empty string, only whitespace, or page break char)
+    if (\$lastText.Length -le 1 -or [string]::IsNullOrWhiteSpace(\$lastText)) {
+      Write-Host "  Removing empty paragraph (\$(\$doc.Paragraphs.Count) remaining)..."
+      try {
+        \$lastPara.Range.Delete() | Out-Null
+        \$removed++
+      } catch {
+        Write-Warning "Failed to delete paragraph: \$_"
+        break
+      }
+    } else {
+      Write-Host "  Found content (text: '\$([char]34)\$(\$lastText.Substring(0, [Math]::Min(20, \$lastText.Length)))[char]34'), stopping removal"
+      break
+    }
+    
+    \$iteration++
+    Start-Sleep -Milliseconds 50
+  }
+  
+  Write-Host "Removed \$removed trailing empty paragraphs"
+`;
+
+
+// ── BLANK PAGE REMOVAL SCRIPT ────────────────────────────────────────────
+const REMOVE_BLANK_PAGES_SCRIPT = `
+param([Parameter(Mandatory=\$true)][string]\$DocPath)
+
+\$DocPath = [System.IO.Path]::GetFullPath(\$DocPath)
+if (-not (Test-Path \$DocPath)) { Write-Error "File not found: \$DocPath"; exit 1 }
+
+\$word = \$null
+\$doc  = \$null
+try {
+  Write-Host "Creating Word COM object for blank page removal..."
+  \$word = New-Object -ComObject Word.Application
+  \$word.Visible = \$false
+  \$word.DisplayAlerts = 0
+
+  Write-Host "Opening document: \$DocPath"
+  \$doc = \$word.Documents.Open(\$DocPath)
+  Start-Sleep -Milliseconds 800
+
+  Write-Host "Removing trailing blank pages..."
+  
+  # ✅ Remove trailing empty paragraphs from the end
+  \$paraCount = \$doc.Paragraphs.Count
+  Write-Host "Document has \$paraCount paragraphs"
+  
+  \$removed = 0
+  # Work backwards from the end
+  for (\$i = \$paraCount; \$i -ge 1; \$i--) {
+    try {
+      \$para = \$doc.Paragraphs.Item(\$i)
+      \$paraText = \$para.Range.Text.Trim()
+      
+      # Check if paragraph is empty or just contains page break
+      if ([string]::IsNullOrWhiteSpace(\$paraText) -or \$paraText -eq [char]12) {
+        \$para.Range.Delete() | Out-Null
+        \$removed++
+        Write-Host "  Removed empty paragraph \$i"
+        
+        # Stop after removing first 10 to avoid excessive deletion
+        if (\$removed -ge 10) { break }
+      } else {
+        # Stop when we hit non-empty content
+        if (\$removed -gt 0) {
+          Write-Host "  Stopped at paragraph \$i (has content)"
+          break
+        }
+      }
+    } catch {
+      Write-Warning "Error processing paragraph \$i: \$_"
+    }
+  }
+  
+  # ✅ Remove manual page breaks at the end
+  Write-Host "Removing trailing page breaks..."
+  \$doc.Range.Find.ClearFormatting()
+  \$doc.Range.Find.Text = "^m"  # Page break in Word regex
+  
+  \$pageBreakCount = 0
+  while (\$doc.Range.Find.Execute()) {
+    # Check if this is a trailing page break
+    \$found = \$doc.Range.Find.Found
+    if (\$found) {
+      \$doc.Range.Delete()
+      \$pageBreakCount++
+    } else {
+      break
+    }
+  }
+  Write-Host "Removed \$pageBreakCount page breaks"
+  
+  # ✅ Final cleanup: consolidate multiple empty paragraphs
+  Write-Host "Consolidating empty lines..."
+  \$doc.Range.Find.ClearFormatting()
+  \$doc.Range.Find.Replacement.ClearFormatting()
+  \$doc.Range.Find.Text = "^p^p^p"      # 3 paragraph marks
+  \$doc.Range.Find.Replacement.Text = "^p^p"  # Replace with 2
+  \$doc.Range.Find.MatchWildcards = \$false
+  \$doc.Range.Find.Execute([ref]\$true,[ref]\$false) | Out-Null
+  
+  Write-Host "Saving document..."
+  \$doc.Save()
+  Start-Sleep -Milliseconds 500
+  
+  Write-Host "Closing document..."
+  \$doc.Close([ref]\$false)
+  
+  Write-Output "BLANK_PAGES_REMOVED"
+  exit 0
+}
+catch {
+  Write-Error "Blank page removal failed: \$_"
+  exit 1
+}
+finally {
+  if (\$doc)  { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject(\$doc) | Out-Null } catch {} }
+  if (\$word) { try { \$word.Quit(); [System.Runtime.InteropServices.Marshal]::ReleaseComObject(\$word) | Out-Null } catch {} }
+  [System.GC]::Collect()
+  [System.GC]::WaitForPendingFinalizers()
+}
+`;
+
+// ---------------------------------------------------------------------------
+// TOC-ONLY SCRIPT  (now includes table auto-fit)
 // ---------------------------------------------------------------------------
 const TOC_ONLY_SCRIPT = `
 param([Parameter(Mandatory=$true)][string]$DocPath)
@@ -44,6 +236,10 @@ try {
   $doc.Fields.Update() | Out-Null
   foreach ($toc in $doc.TablesOfContents) { $toc.UpdatePageNumbers() }
 
+${TABLE_AUTOFIT_BLOCK}
+
+${BLANK_PAGE_REMOVAL_BLOCK}
+
   Write-Host "Saving document..."
   $doc.Save()
   Start-Sleep -Milliseconds 500
@@ -68,8 +264,7 @@ finally {
 `;
 
 // ---------------------------------------------------------------------------
-// ✅ BULLETPROOF PDF SCRIPT
-// Uses async export + immediate exit (don't wait for COM return)
+// ✅ BULLETPROOF PDF SCRIPT  (now includes table auto-fit before export)
 // ---------------------------------------------------------------------------
 const PDF_ONLY_SCRIPT = `
 param(
@@ -99,6 +294,17 @@ try {
   $doc = $word.Documents.Open($DocPath)
   Start-Sleep -Milliseconds 1000
 
+${TABLE_AUTOFIT_BLOCK}
+
+  # ✅ Additional wait after auto-fit to ensure all formatting is applied
+  Write-Host "Stabilizing document after auto-fit..."
+  Start-Sleep -Milliseconds 1500
+
+  # Save after auto-fit so the layout is baked in before PDF export
+  Write-Host "Saving auto-fit layout..."
+  $doc.Save()
+  Start-Sleep -Milliseconds 500
+
   Write-Host "Exporting to PDF: $PdfPath"
   
   try {
@@ -119,6 +325,13 @@ try {
       throw "PDF export failed: $_"
     }
   }
+
+  # ✅ Remove blank pages before final save
+${BLANK_PAGE_REMOVAL_BLOCK}
+  
+  # Save cleaned document
+  \$doc.Save()
+  Start-Sleep -Milliseconds 500
 
   Write-Output "PDF_OK"
   exit 0
@@ -280,16 +493,16 @@ function generateTOCAndExportPDF(docPath) {
 
 /**
  * ✅ BULLETPROOF: Handles even the most stubborn RPC_E_DISCONNECTED cases
- * 
+ *
  * Key insights from error logs:
  * - "PDF export completed successfully" message appears
  * - Then error fires in catch block
  * - This means ExportAsFixedFormat() succeeded but cleanup failed
  * - Solution: Don't trap the export, let it run to completion, minimal cleanup
- * 
- * @param {string} base64 - Base64 encoded DOCX content
+ *
+ * @param {string} base64   - Base64 encoded DOCX content
  * @param {string} fileName - DOCX filename
- * @param {string} tempDir - Optional temp directory (for preview). If not provided, uses Downloads
+ * @param {string} tempDir  - Optional temp directory (for preview). If not provided, uses Downloads
  */
 function processDOCXAndGeneratePDF(base64, fileName, tempDir) {
   if (process.platform !== "win32") {
@@ -317,20 +530,20 @@ function processDOCXAndGeneratePDF(base64, fileName, tempDir) {
 
     pdfPath = docxPath.replace(/\.docx$/i, ".pdf");
 
-    // Step 2: Update TOC (Process #1)
-    console.log("[wordCom] Step 1/3: Updating TOC...");
+    // Step 2: Update TOC + auto-fit tables (Process #1)
+    console.log("[wordCom] Step 1/3: Updating TOC and auto-fitting tables...");
     const tocScriptPath = writeTempScript(TOC_ONLY_SCRIPT, "toc");
 
     return runPowerShell(tocScriptPath, ["-DocPath", docxPath], 90000)
       .then((output) => {
-        console.log("[wordCom] ✅ TOC updated");
+        console.log("[wordCom] ✅ TOC updated and tables auto-fitted");
 
         // Step 3: Long wait for system stabilization
         console.log("[wordCom] Waiting 5 seconds for complete system stabilization...");
         return new Promise((resolve) => setTimeout(resolve, 5000));
       })
       .then(() => {
-        // Step 4: Export to PDF (Process #2)
+        // Step 4: Export to PDF (Process #2 — tables already auto-fitted + saved)
         console.log("[wordCom] Step 2/3: Exporting to PDF...");
         const pdfScriptPath = writeTempScript(PDF_ONLY_SCRIPT, "pdf");
 
@@ -339,7 +552,7 @@ function processDOCXAndGeneratePDF(base64, fileName, tempDir) {
           docxPath,
           "-PdfPath",
           pdfPath,
-        ], 180000);  // Longer timeout for PDF export
+        ], 180000); // Longer timeout for PDF export
       })
       .then((output) => {
         console.log("[wordCom] ✅ PDF export result:", output);

@@ -7,6 +7,7 @@
 const fs   = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const PizZip = require("pizzip");
 const Draft = require("../models/draft");
 
 const TEMPLATE = path.join(__dirname, "../templates/hpe-proposal-template.pptx");
@@ -248,6 +249,49 @@ exports.generateProposal = async (req, res) => {
 
     if (!fs.existsSync(outputPath)) {
       throw new Error("fill_proposal.py did not produce an output file");
+    }
+
+    // ── Post-generate placeholder replacement (same as DOCX) ─────────────────
+    try {
+      const pptxContent = fs.readFileSync(outputPath);
+      const zipPptx = new PizZip(pptxContent);
+
+      const placeholders = {
+        "{{customerName}}": customerName || "",
+        "{{partnerName}}": partnerName || "",
+        "{{partnerOrCustomerName}}": partnerName || customerName || "",
+        "{{opeId}}": opeId || "",
+        "{{quoteId}}": quoteId || "",
+      };
+
+      Object.keys(zipPptx.files).forEach((fname) => {
+        if (!fname.endsWith(".xml")) return;
+        try {
+          let xml = zipPptx.file(fname).asText();
+          let replaced = false;
+          for (const [token, val] of Object.entries(placeholders)) {
+            const re = new RegExp(
+              token.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1"),
+              "g"
+            );
+            if (re.test(xml)) {
+              xml = xml.replace(re, val);
+              replaced = true;
+            }
+          }
+          if (replaced) zipPptx.file(fname, xml);
+        } catch (e) {
+          console.warn("Post-replace warning in", fname, e.message);
+        }
+      });
+
+      // Write updated PPTX back to file
+      const updatedPptxContent = zipPptx.generate({ type: "nodebuffer" });
+      fs.writeFileSync(outputPath, updatedPptxContent);
+      console.log("[generateProposal] Placeholder replacement complete");
+    } catch (err) {
+      console.warn("[generateProposal] Placeholder replacement failed:", err.message);
+      // Don't stop the flow if placeholder replacement fails
     }
 
     // ── Stream response ──────────────────────────────────────────────────────
