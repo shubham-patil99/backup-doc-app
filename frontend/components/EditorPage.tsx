@@ -310,7 +310,7 @@ const EditorPage: React.FC<EditorPageProps> = ({
 
   return (
     <>
-      <div className="jodit-editor-wrapper" style={{ position: "relative", overflow: "visible" }}>
+      <div className="jodit-editor-wrapper" style={{ position: "relative", overflow: "visible", height: "100%", width: "100%", minHeight: `${minHeight}px` }}>
         <JoditEditor
           ref={editor}
           value={value}

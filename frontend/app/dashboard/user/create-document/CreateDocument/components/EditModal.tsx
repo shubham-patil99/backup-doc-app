@@ -75,6 +75,14 @@ export default function EditModal({ module, name, description, onNameChange, onD
         </div>
       </div>
 
+      <style jsx>{`
+        /* Fix lucide icons rendering at huge size initially */
+        svg {
+          width: 1em;
+          height: 1em;
+        }
+      `}</style>
+
       <style jsx global>{`
         /* Make Jodit editor fill the available space in modal */
         .jodit-editor-wrapper .jodit-container {

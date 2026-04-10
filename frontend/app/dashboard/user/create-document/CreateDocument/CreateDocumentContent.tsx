@@ -595,7 +595,9 @@ export default function CreateDocumentContent() {
         if (!full) return m;
         const mergedModule = {
           ...m,
-          name: full.name ?? m.name,
+          // ✅ FIX: Prioritize saved name from documentSections over API source
+          // User's edits to module name are stored in draft, not in API source list
+          name: m.name ?? full.name,
           canEdit: typeof full.canEdit !== "undefined" ? full.canEdit : m.canEdit,
         };
         if (JSON.stringify(mergedModule) !== JSON.stringify(m)) changed = true;
