@@ -13,14 +13,14 @@ export default function EditModal({ module, name, description, onNameChange, onD
           <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
             <Edit3 className="text-white" size={16} />
           </div>
-          <h3 className="text-xl font-semibold">Edit Module: {module.name}</h3>
+          <h3 className="text-xl font-semibold">Edit Section: {module.name}</h3>
         </div>
 
         {/* Body */}
         <div className="flex flex-1 flex-col gap-6 p-6 overflow-auto">
           {/* Module Name */}
           <div>
-            <label className="block font-medium mb-2">Module Name</label>
+            <label className="block font-medium mb-2">Section Name</label>
             <input
               type="text"
               value={name || ""}

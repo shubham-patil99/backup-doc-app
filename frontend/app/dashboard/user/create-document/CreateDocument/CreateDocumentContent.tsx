@@ -14,6 +14,8 @@ import { apiFetch } from "@/lib/apiClient";
 import DocxPreviewModal from "./components/DocxPreviewModal";
 import UserHeader from "@/components/UserHeader";
 import SowTypeWarningModal from "./components/SowTypeWarningModal";
+import SearchModal from "./components/SearchModal";
+import useSearchModal from "./hooks/useSearchModal";
 
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -112,6 +114,9 @@ export default function CreateDocumentContent() {
   const [draftVersions, setDraftVersions] = useState<number[]>([]);
   const [finalVersions, setFinalVersions] = useState<number[]>([]);
 
+  const [highlightedSectionId, setHighlightedSectionId] = useState<number | null>(null);
+const [highlightedModuleId, setHighlightedModuleId] = useState<number | null>(null);
+
   // ── Drag state ───────────────────────────────────────────────────────────────
   const [expandedSections, setExpandedSections] = useState<number[]>([]);
   const dragSourceRef = useRef<{ sectionId: number; index: number } | null>(null);
@@ -134,6 +139,8 @@ export default function CreateDocumentContent() {
   const dataFetchedAfterLoadRef = useRef(false);
   const savingPromiseRef = useRef<Promise<any> | null>(null);
   const customerNoInitialMount = useRef(true);
+
+  const { isOpen: showSearch, close: closeSearch } = useSearchModal();
 
   // ── FIX 1: Hydration guard — prevents localStorage sync from firing before
   //    state has been populated from localStorage on first mount ────────────────
@@ -1448,6 +1455,40 @@ export default function CreateDocumentContent() {
     );
   }
 
+  const handleSearchResultSelect = (result: any) => {
+if (result.type === "section") {
+// Expand the section in available modules
+setExpandedSections((prev) =>
+prev.includes(result.id) ? prev : [...prev, result.id]
+);
+  // Scroll to the section in the left pane
+  setTimeout(() => {
+    const element = document.querySelector(
+      `[data-section-id="${result.id}"]`
+    );
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, 100);
+} else if (result.type === "module") {
+  // Expand the parent section
+  const parentSectionId = result.sectionId;
+  setExpandedSections((prev) =>
+    prev.includes(parentSectionId) ? prev : [...prev, parentSectionId]
+  );
+
+  // Scroll to the module in the left pane
+  setTimeout(() => {
+    const element = document.querySelector(
+      `[data-module-id="${result.id}"]`
+    );
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, 100);
+}
+};
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -1652,14 +1693,14 @@ export default function CreateDocumentContent() {
             </div>
             <div className="space-y-2">
               <AvailableSection
-                sections={visibleSectionsWithModules.map((section) => ({
+                  sections={visibleSectionsWithModules.map((section) => ({
                   ...section,
                   title: stripHtmlLocal(section.title) || stripHtmlLocal(section.description || "").split("\n")[0],
-                }))}
-                expandedSections={expandedSections}
-                toggleSection={(id) => setExpandedSections((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])}
-                handleDragStart={handleDragStart}
-              />
+                  }))}
+                  expandedSections={expandedSections}
+                  toggleSection={(id) => setExpandedSections((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])}
+                  handleDragStart={handleDragStart}
+                  />
             </div>
           </div>
 
@@ -1822,6 +1863,14 @@ export default function CreateDocumentContent() {
         onCancel={() => { setShowSowTypeWarning(false); setPendingSowType(null); }}
         fromType={sowSize} toType={pendingSowType || sowSize}
       />
+
+        <SearchModal
+            isOpen={showSearch}
+            onClose={closeSearch}
+            sections={visibleSectionsWithModules}
+            modules={visibleModules}
+            onSelectResult={handleSearchResultSelect}
+          />
 
       {toast && (
         <div className="fixed bottom-4 right-4 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg z-50">{toast}</div>
