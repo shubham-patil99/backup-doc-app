@@ -676,6 +676,15 @@ const [highlightedModuleId, setHighlightedModuleId] = useState<number | null>(nu
     if (autoSaveDebounceRef.current) clearTimeout(autoSaveDebounceRef.current);
   }, []);
 
+  /** Clear old highlighting when opening search modal for fresh search */
+  useEffect(() => {
+    if (showSearch) {
+      // Reset highlights to prepare for new search
+      setHighlightedSectionId(null);
+      setHighlightedModuleId(null);
+    }
+  }, [showSearch]);
+
   // ─── Data Fetching ───────────────────────────────────────────────────────────
 
   const fetchData = async (docType: string = sowSize) => {
@@ -1457,39 +1466,42 @@ const [highlightedModuleId, setHighlightedModuleId] = useState<number | null>(nu
 
   const handleSearchResultSelect = (result: any) => {
 if (result.type === "section") {
-// Expand the section in available modules
-setExpandedSections((prev) =>
-prev.includes(result.id) ? prev : [...prev, result.id]
-);
-  // Scroll to the section in the left pane
-  setTimeout(() => {
-    const element = document.querySelector(
-      `[data-section-id="${result.id}"]`
-    );
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      // Highlight the section
+      setHighlightedSectionId(result.id);
+      setHighlightedModuleId(null);
+      // Expand the section in available modules
+      setExpandedSections((prev) =>
+        prev.includes(result.id) ? prev : [...prev, result.id]
+      );
+      // Scroll to the section in the left pane
+      setTimeout(() => {
+        const element = document.querySelector(
+          `[data-section-id="${result.id}"]`
+        );
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      }, 100);
+    } else if (result.type === "module") {
+      // Highlight the module
+      setHighlightedModuleId(result.id);
+      setHighlightedSectionId(result.sectionId);
+      // Expand the parent section
+      const parentSectionId = result.sectionId;
+      setExpandedSections((prev) =>
+        prev.includes(parentSectionId) ? prev : [...prev, parentSectionId]
+      );
+      // Scroll to the module in the left pane
+      setTimeout(() => {
+        const element = document.querySelector(
+          `[data-module-id="${result.id}"]`
+        );
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      }, 100);
     }
-  }, 100);
-} else if (result.type === "module") {
-  // Expand the parent section
-  const parentSectionId = result.sectionId;
-  setExpandedSections((prev) =>
-    prev.includes(parentSectionId) ? prev : [...prev, parentSectionId]
-  );
-
-  // Scroll to the module in the left pane
-  setTimeout(() => {
-    const element = document.querySelector(
-      `[data-module-id="${result.id}"]`
-    );
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, 100);
-}
-};
-
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 text-sm" onDragEnd={handleDragEnd}>
@@ -1700,6 +1712,8 @@ prev.includes(result.id) ? prev : [...prev, result.id]
                   expandedSections={expandedSections}
                   toggleSection={(id) => setExpandedSections((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])}
                   handleDragStart={handleDragStart}
+                  highlightedSectionId={highlightedSectionId}
+                  highlightedModuleId={highlightedModuleId}
                   />
             </div>
           </div>
