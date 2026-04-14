@@ -1,11 +1,11 @@
 const CustomerDetail = require("../models/customerDetail");
-const { Op } = require("sequelize");
+const { Op, literal, fn, col } = require("sequelize");
+const sequelize = require("../config/database"); // adjust path if needed
 
 exports.getCustomers = async (req, res) => {
   try {
-    // pagination params
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = 15
+    const limit = 15;
     const offset = (page - 1) * limit;
 
     const { count, rows } = await CustomerDetail.findAndCountAll({
@@ -33,7 +33,8 @@ exports.getCustomerByNumber = async (req, res) => {
   try {
     const { customerNo } = req.params;
     const customer = await CustomerDetail.findOne({ where: { customerNo } });
-    if (!customer) return res.status(404).json({ success: false, error: "Customer not found" });
+    if (!customer)
+      return res.status(404).json({ success: false, error: "Customer not found" });
     res.json({ success: true, customer });
   } catch (err) {
     console.error("Error fetching customer:", err);
@@ -44,16 +45,38 @@ exports.getCustomerByNumber = async (req, res) => {
 exports.searchCustomers = async (req, res) => {
   try {
     const { query } = req.query;
-    const where = {};
-    if (query) {
-      where.customerName = { [Op.iLike]: `%${query}%` };
+
+    if (!query || !query.trim()) {
+      // Return all (paginated) if no query
+      const customers = await CustomerDetail.findAll({
+        attributes: ["tblRid", "customerNo", "customerName", "country", "siteId"],
+        order: [["customerName", "ASC"]],
+        limit: 100,
+      });
+      return res.json({ success: true, results: customers });
     }
+
+    const escaped = query.trim().replace(/[%_]/g, "\\$&"); // prevent LIKE injection
+
+    // customer_no is INTEGER — must cast to TEXT for ILIKE
+    // Using sequelize.literal for the cast
     const customers = await CustomerDetail.findAll({
-      where,
       attributes: ["tblRid", "customerNo", "customerName", "country", "siteId"],
+      where: {
+        [Op.or]: [
+          { customerName: { [Op.iLike]: `%${escaped}%` } },
+          // Cast integer column to text before ILIKE
+          literal(
+            `CAST("CustomerDetail"."customer_no" AS TEXT) ILIKE '%${escaped}%'`
+          ),
+          { country: { [Op.iLike]: `%${escaped}%` } },
+          { siteId: { [Op.iLike]: `%${escaped}%` } },
+        ],
+      },
       order: [["customerName", "ASC"]],
-      limit: 20,
+      limit: 100,
     });
+
     res.json({ success: true, results: customers });
   } catch (err) {
     console.error("Error searching customers:", err);
@@ -65,17 +88,22 @@ exports.addCustomer = async (req, res) => {
   try {
     const { customerNo, customerName, country, siteId } = req.body;
     if (!customerNo || !customerName) {
-      return res.status(400).json({ success: false, error: "customerNo and customerName are required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "customerNo and customerName are required" });
     }
 
-    // Field-level uniqueness checks (only customerNo and customerName must be unique)
     const dupNo = await CustomerDetail.findOne({ where: { customerNo } });
-    if (dupNo) return res.status(409).json({ success: false, error: "Customer number already exists", field: "customerNo" });
+    if (dupNo)
+      return res
+        .status(409)
+        .json({ success: false, error: "Customer number already exists", field: "customerNo" });
 
     const dupName = await CustomerDetail.findOne({ where: { customerName } });
-    if (dupName) return res.status(409).json({ success: false, error: "Customer name already exists", field: "customerName" });
-
-    // Country and SiteId can be duplicated across customers
+    if (dupName)
+      return res
+        .status(409)
+        .json({ success: false, error: "Customer name already exists", field: "customerName" });
 
     const newCustomer = await CustomerDetail.create({
       customerNo,
@@ -92,9 +120,10 @@ exports.addCustomer = async (req, res) => {
 
 exports.deleteCustomer = async (req, res) => {
   try {
-    const { id } = req.params; // expecting tblRid
+    const { id } = req.params;
     const deleted = await CustomerDetail.destroy({ where: { tblRid: id } });
-    if (!deleted) return res.status(404).json({ success: false, error: "Customer not found" });
+    if (!deleted)
+      return res.status(404).json({ success: false, error: "Customer not found" });
     res.json({ success: true, message: "Customer deleted successfully" });
   } catch (err) {
     console.error("Error deleting customer:", err);
@@ -104,26 +133,37 @@ exports.deleteCustomer = async (req, res) => {
 
 exports.updateCustomer = async (req, res) => {
   try {
-    const { id } = req.params; // tblRid
+    const { id } = req.params;
     const { customerNo, customerName, country, siteId } = req.body;
-    if (!customerName) return res.status(400).json({ success: false, error: "customerName is required" });
+    if (!customerName)
+      return res.status(400).json({ success: false, error: "customerName is required" });
 
     const existing = await CustomerDetail.findOne({ where: { tblRid: id } });
-    if (!existing) return res.status(404).json({ success: false, error: "Customer not found" });
+    if (!existing)
+      return res.status(404).json({ success: false, error: "Customer not found" });
 
-    // Field-level uniqueness checks (only customerNo and customerName must be unique)
     if (customerNo && customerNo !== existing.customerNo) {
       const dup = await CustomerDetail.findOne({ where: { customerNo } });
-      if (dup) return res.status(409).json({ success: false, error: "Customer number already exists", field: "customerNo" });
+      if (dup)
+        return res
+          .status(409)
+          .json({ success: false, error: "Customer number already exists", field: "customerNo" });
     }
     if (customerName && customerName !== existing.customerName) {
       const dupN = await CustomerDetail.findOne({ where: { customerName } });
-      if (dupN) return res.status(409).json({ success: false, error: "Customer name already exists", field: "customerName" });
+      if (dupN)
+        return res
+          .status(409)
+          .json({ success: false, error: "Customer name already exists", field: "customerName" });
     }
-    // Country and SiteId can be duplicated across customers - no uniqueness checks needed
 
     await CustomerDetail.update(
-      { customerNo: customerNo || existing.customerNo, customerName, country: country || null, siteId: siteId || null },
+      {
+        customerNo: customerNo || existing.customerNo,
+        customerName,
+        country: country || null,
+        siteId: siteId || null,
+      },
       { where: { tblRid: id }, returning: true }
     );
     const updated = await CustomerDetail.findOne({ where: { tblRid: id } });
