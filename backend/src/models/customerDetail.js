@@ -15,11 +15,13 @@ const CustomerDetail = sequelize.define(
     customerNo: {
       type: DataTypes.INTEGER,
       allowNull: false,
+      unique: true,
       field: "customer_no",
     },
     customerName: {
       type: DataTypes.STRING,
       allowNull: false,
+      unique: true,
       field: "customer_name",
     },
     country: {

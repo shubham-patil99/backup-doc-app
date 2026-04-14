@@ -58,34 +58,61 @@ export default function CustomersTab() {
 
   useEffect(() => { loadCustomers(page); }, []);
 
-  const handleAdd = async () => {
-    if (!newNo || !newName) return setError("Customer number and name required");
-    setSubmitting(true); 
-    setError("");
-    try {
-      const res = await apiFetch("/customers/add-customer", {
-        method: "POST",
-        body: { customerNo: newNo, customerName: newName, country: newCountry, siteId: newSite },
-      });
-      if (res.success) {
-        // refresh current page after add (server may place new record into page 1)
-        await loadCustomers(1);
-        setNewName(""); 
-        setNewNo(""); 
-        setNewCountry(""); 
-        setNewSite("");
-        showSuccess("Customer added successfully!");
-      } else {
-        // show field-specific message as toast
-        showError(res.error || "Failed to add customer");
-      }
-    } catch (err) {
-      console.error(err); 
-      showError(err.message || "Failed to add customer");
-    } finally { 
-      setSubmitting(false); 
+const handleAdd = async () => {
+  if (!newNo || !newName) {
+    showError("Customer number and name required");
+    return;
+  }
+
+  setSubmitting(true);
+
+  try {
+    const res = await apiFetch("/customers/add-customer", {
+      method: "POST",
+      body: {
+        customerNo: newNo,
+        customerName: newName,
+        country: newCountry,
+        siteId: newSite,
+      },
+    });
+
+    console.log("Add response:", res);
+
+    // ✅ success case only
+    if (res?.success) {
+      await loadCustomers(1);
+
+      setNewName("");
+      setNewNo("");
+      setNewCountry("");
+      setNewSite("");
+
+      showSuccess("Customer added successfully!");
+    } else {
+      // fallback (rare case if API doesn't throw)
+      showError("Failed to add customer");
     }
-  };
+
+  } catch (err: any) {
+    // 🔥 proper debugging logs
+    console.error("Full error object:", err);
+    console.error("Error message:", err?.message);
+    console.error("Error response:", err?.response);
+    console.error("Backend error:", err?.response?.data);
+
+    // ✅ extract best possible message
+    const errorMsg =
+      err?.response?.data?.error ||
+      err?.message ||
+      "Failed to add customer";
+
+    showError(errorMsg);
+
+  } finally {
+    setSubmitting(false);
+  }
+};
   
   const startEdit = (c) => {
     setEditingId(c.tblRid);
@@ -97,14 +124,17 @@ export default function CustomersTab() {
   };
 
   const saveEdit = async (id) => {
-    if (!editName) return setError("Name required");
-    setError("");
+    if (!editName) {
+      showError("Name required");
+      return;
+    }
     try {
       const res = await apiFetch(`/customers/update-customer/${id}`, {
         method: "PUT",
         body: { customerNo: editNo, customerName: editName, country: editCountry, siteId: editSite },
       });
-      if (res.success) {
+      console.log("Update response:", res);
+      if (res?.success) {
         await loadCustomers(page);
         setEditingId(null); 
         setEditName(""); 
@@ -112,12 +142,22 @@ export default function CustomersTab() {
         setEditCountry(""); 
         setEditSite("");
         showSuccess("Customer updated successfully!");
+      } else if (res?.error) {
+        // server returned an error
+        showError(res.error);
       } else {
-        showError(res.error || "Failed to update");
+        showError("Failed to update");
       }
     } catch (err) {
-      console.error(err); 
-      showError(err.message || "Failed to update");
+      console.error("Update error:", err);
+      // Try to extract error message from various possible locations
+      let errorMsg = "Failed to update";
+      if (err?.response?.data?.error) {
+        errorMsg = err.response.data.error;
+      } else if (err?.message) {
+        errorMsg = err.message;
+      }
+      showError(errorMsg);
     }
   };
 
@@ -128,18 +168,29 @@ export default function CustomersTab() {
   const confirmDelete = async (id) => {
     try {
       const res = await apiFetch(`/customers/delete-customer/${id}`, { method: "DELETE" });
-      if (res.success) {
+      console.log("Delete response:", res);
+      if (res?.success) {
         // if deleting last item of last page, move page back if needed
         const remainingOnPage = customers.length - 1;
         const newPage = remainingOnPage === 0 && page > 1 ? page - 1 : page;
         await loadCustomers(newPage);
         showSuccess("Customer removed successfully!");
+      } else if (res?.error) {
+        // server returned an error
+        showError(res.error);
       } else {
-        showError(res.error || "Failed to delete");
+        showError("Failed to delete");
       }
     } catch (err) {
-      console.error(err); 
-      showError(err.message || "Failed to delete");
+      console.error("Delete error:", err);
+      // Try to extract error message from various possible locations
+      let errorMsg = "Failed to delete";
+      if (err?.response?.data?.error) {
+        errorMsg = err.response.data.error;
+      } else if (err?.message) {
+        errorMsg = err.message;
+      }
+      showError(errorMsg);
     } finally {
       setDeleteConfirmModal(null);
     }

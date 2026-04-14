@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { User } from "lucide-react";
 import logo from "@/assets/hpe-logo.png";
+import { color } from "jodit/esm/plugins/color/color";
 
 export default function UserHeader({ username }) {
   const [hydrated, setHydrated] = useState(false);
@@ -44,13 +45,17 @@ export default function UserHeader({ username }) {
               <User className="text-white" size={16} />
             </div>
             {showLogout && (
-              <div className="absolute right-0 mt-2 bg-white border rounded shadow-lg z-50 min-w-[120px]">
+              <div className="absolute right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[140px] overflow-hidden">
                 <button
-                  className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 cursor-pointer"
+                  className="w-full text-left px-4 py-3 text-gray-700 hover:bg-red-50 border-b border-gray-100 cursor-pointer font-medium text-sm"
                   onClick={handleLogout}
+                  style={{color: 'red', fontWeight: 'bold'}}
                 >
                   Logout
                 </button>
+                <div className="px-4 py-1 bg-gray-50 border-t border-gray-100">
+                  <p className="text-[12px] text-gray-800 font-semibold">brahma_2026.04_IT3</p>
+                </div>
               </div>
             )}
           </div>

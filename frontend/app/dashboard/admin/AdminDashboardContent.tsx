@@ -113,15 +113,16 @@ export default function AdminDashboardContent() {
           {/* Profile Dropdown */}
           {showProfileMenu && (
             <Box
-              background="light-1"
+              background="white"
               pad="small"
               round="small"
               elevation="small"
-              gap="small"
               style={{
                 position: "absolute",
                 top: "50px",
                 right: "20px",
+                minWidth: "160px",
+                border: "1px solid #e5e7eb",
               }}
             >
               <Button
@@ -130,7 +131,22 @@ export default function AdminDashboardContent() {
                 label="Logout"
                 onClick={handleLogout}
                 color="status-critical"
+                style={{
+                  fontSize: "14px",
+                  fontWeight: "500",
+                  padding: "8px",
+                }}
               />
+              <Box
+                style={{
+                  borderTop: "1px solid #f3f4f6",
+                  marginTop: "2px",
+                }}
+              >
+                <Text size="12px" color="#1f2937" weight="bold">
+                  brahma_2026.04_IT3
+                </Text>
+              </Box>
             </Box>
           )}
         </Box>

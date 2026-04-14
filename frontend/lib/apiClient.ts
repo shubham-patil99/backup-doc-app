@@ -28,14 +28,25 @@ export async function apiFetch(endpoint: string, options: ExtendedRequestInit = 
     body: payload, // 👈 Use the serialized version
   });
 
-  if (!res.ok) {
-    let message = `Error ${res.status}`;
-    try {
-      const err = await res.json();
-      message = err.message || message;
-    } catch (_) {}
-    throw new Error(message);
-  }
+if (!res.ok) {
+  let data: any = null;
+
+  try {
+    data = await res.json(); // 🔥 get full backend response
+  } catch (_) {}
+
+  const error: any = new Error(
+    data?.error || data?.message || `Error ${res.status}`
+  );
+
+  // 🔥 attach full response (VERY IMPORTANT)
+  error.response = {
+    data,
+    status: res.status,
+  };
+
+  throw error;
+}
 
   return isBlob ? res.blob() : res.json();
 }

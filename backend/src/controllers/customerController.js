@@ -68,22 +68,14 @@ exports.addCustomer = async (req, res) => {
       return res.status(400).json({ success: false, error: "customerNo and customerName are required" });
     }
 
-    // Field-level uniqueness checks
+    // Field-level uniqueness checks (only customerNo and customerName must be unique)
     const dupNo = await CustomerDetail.findOne({ where: { customerNo } });
     if (dupNo) return res.status(409).json({ success: false, error: "Customer number already exists", field: "customerNo" });
 
     const dupName = await CustomerDetail.findOne({ where: { customerName } });
     if (dupName) return res.status(409).json({ success: false, error: "Customer name already exists", field: "customerName" });
 
-    if (country) {
-      const dupCountry = await CustomerDetail.findOne({ where: { country } });
-      if (dupCountry) return res.status(409).json({ success: false, error: "Country value already exists", field: "country" });
-    }
-
-    if (siteId) {
-      const dupSite = await CustomerDetail.findOne({ where: { siteId } });
-      if (dupSite) return res.status(409).json({ success: false, error: "Site ID already exists", field: "siteId" });
-    }
+    // Country and SiteId can be duplicated across customers
 
     const newCustomer = await CustomerDetail.create({
       customerNo,
@@ -119,7 +111,7 @@ exports.updateCustomer = async (req, res) => {
     const existing = await CustomerDetail.findOne({ where: { tblRid: id } });
     if (!existing) return res.status(404).json({ success: false, error: "Customer not found" });
 
-    // Field-level uniqueness checks (exclude current record)
+    // Field-level uniqueness checks (only customerNo and customerName must be unique)
     if (customerNo && customerNo !== existing.customerNo) {
       const dup = await CustomerDetail.findOne({ where: { customerNo } });
       if (dup) return res.status(409).json({ success: false, error: "Customer number already exists", field: "customerNo" });
@@ -128,14 +120,7 @@ exports.updateCustomer = async (req, res) => {
       const dupN = await CustomerDetail.findOne({ where: { customerName } });
       if (dupN) return res.status(409).json({ success: false, error: "Customer name already exists", field: "customerName" });
     }
-    if (country && country !== existing.country) {
-      const dupC = await CustomerDetail.findOne({ where: { country } });
-      if (dupC) return res.status(409).json({ success: false, error: "Country value already exists", field: "country" });
-    }
-    if (siteId && siteId !== existing.siteId) {
-      const dupS = await CustomerDetail.findOne({ where: { siteId } });
-      if (dupS) return res.status(409).json({ success: false, error: "Site ID already exists", field: "siteId" });
-    }
+    // Country and SiteId can be duplicated across customers - no uniqueness checks needed
 
     await CustomerDetail.update(
       { customerNo: customerNo || existing.customerNo, customerName, country: country || null, siteId: siteId || null },
