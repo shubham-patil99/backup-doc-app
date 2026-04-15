@@ -123,7 +123,6 @@ function createWindow() {
     const startURL = "http://localhost:3000/auth/login";
     console.log("[main] DEVELOPMENT mode: loading", startURL);
     win.loadURL(startURL).catch((err) => console.error("Failed to load URL:", err));
-    win.webContents.openDevTools();
   } else {
     const frontendPath = path.join(
       process.resourcesPath,
@@ -148,8 +147,6 @@ function createWindow() {
         win.loadURL(url).catch((err) =>
           console.error("Failed to load URL:", err)
         );
-        // ── Remove once confirmed working ──
-        win.webContents.openDevTools();
       })
       .catch((err) => {
         console.error("[main] Failed to start static server:", err.message);
