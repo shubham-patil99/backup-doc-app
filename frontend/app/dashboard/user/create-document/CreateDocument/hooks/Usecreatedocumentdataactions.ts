@@ -24,6 +24,7 @@ export function useCreateDocumentDataActions(state: any) {
     contractingPartyRef, partnerNameRef,
     documentName, setDocumentName,
     quoteId, opeId, setOpeId,
+    hpeLegalEntity,
     sowSize, setSowSize,
     version, setVersion,
     isSaving, setIsSaving,
@@ -180,7 +181,7 @@ export function useCreateDocumentDataActions(state: any) {
           customerName, customerNo,
           contractingParty: currentContractingParty || null,
           partnerName: currentContractingParty || currentPartnerName || null,
-          documentName, quoteId: quoteId || null,
+          documentName, quoteId: quoteId || null, hpeLegalEntity,
           content: { documentSections: normalizedSections },
           sowType: sowTypeStr, status: "draft",
         };
@@ -415,11 +416,11 @@ export function useCreateDocumentDataActions(state: any) {
     setPreviewLoading(true);
     setPreviewFileType("pdf");
     try {
-      const vars = { customerName, partnerName, documentName, opeId };
+      const vars = { customerName, partnerName, documentName, opeId, hpeLegalEntity };
       const isProposal = sowSize === "proposal";
       const payload = {
         customerName, customerEmail: "", customerAddress: "", contractingParty, partnerName,
-        quoteId, documentTitle: documentName,
+        quoteId, hpeLegalEntity, documentTitle: documentName,
         sowType: sowSize === "small" ? "SMALL" : sowSize === "proposal" ? "PROPOSAL" : "FULL",
         status: "draft", createdAtFormatted: formatDateOnly(new Date()),
         sections: documentSections.map((s: any) => ({
@@ -524,7 +525,7 @@ export function useCreateDocumentDataActions(state: any) {
           opeId, userId: state.userId, customerName, customerNo, contractingParty, partnerName,
           customerEmail: "", customerAddress: "", documentName,
           fileName: `${formattedBase}.${sowSize === "proposal" ? "pptx" : type}`,
-          quoteId, content: { documentSections }, sowType: sowTypeStr, status,
+          quoteId, hpeLegalEntity, content: { documentSections }, sowType: sowTypeStr, status,
         }),
       });
       if (saveRes.success) {

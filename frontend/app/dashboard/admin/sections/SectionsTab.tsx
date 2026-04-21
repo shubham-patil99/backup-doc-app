@@ -198,7 +198,7 @@ function SortableItem({
           <div className="flex items-center gap-4 flex-wrap">
             <p className="text-xs font-semibold text-gray-600 whitespace-nowrap">Assign to:</p>
             <div className="flex gap-4">
-            {["full", "small", "proposal"].map((type) => (
+            {["full", "short", "proposal"].map((type) => (
               <label
                 key={type}
                 className="flex items-center gap-2 cursor-pointer hover:text-green-600 transition-colors"

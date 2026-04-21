@@ -51,6 +51,7 @@ export default function CreateDocumentContent() {
     contractingParty, setContractingParty,
     partnerName, opeId, setOpeId,
     quoteId, setQuoteId, version,
+    hpeLegalEntity, setHpeLegalEntity,
     sowSize, setSowSize,
     showSowTypeWarning, setShowSowTypeWarning, pendingSowType, setPendingSowType,
     loading, generating, previewLoading,
@@ -62,6 +63,8 @@ export default function CreateDocumentContent() {
     contractingPartyFocused, setContractingPartyFocused,
     isSavingContractingParty, setIsSavingContractingParty,
     quoteIdFocused, setQuoteIdFocused, isSavingQuoteId, setIsSavingQuoteId,
+    hpeLegalEntityFocused, setHpeLegalEntityFocused,
+    isSavingHpeLegalEntity, setIsSavingHpeLegalEntity,
     showPreview, setShowPreview,
     previewPdfUrl, previewFileType,
     showGenerateModal, setShowGenerateModal,
@@ -130,7 +133,7 @@ export default function CreateDocumentContent() {
       });
   }, [visibleSectionsWithModules, searchQuery]);
 
-  const vars = { customerName, partnerName, documentName, opeId };
+  const vars = { customerName, partnerName, documentName, opeId, hpeLegalEntity };
 
   const previewPayload = useMemo(() => ({
     customerName, customerEmail: "", customerAddress: "", contractingParty, partnerName,
@@ -192,6 +195,15 @@ export default function CreateDocumentContent() {
     finally { setIsSavingQuoteId(false); setQuoteIdFocused(false); }
   };
 
+  const onSaveHpeLegalEntity = async () => {
+    setIsSavingHpeLegalEntity(true);
+    try {
+      const result = await actions.autoSaveDraft();
+      actions.showToast(result?.success ? "HPE Legal Entity saved!" : result?.savedLocally ? "Saved locally" : "Failed to save");
+    } catch { actions.showToast("Failed to save HPE Legal Entity"); }
+    finally { setIsSavingHpeLegalEntity(false); setHpeLegalEntityFocused(false); }
+  };
+
   // ── Loading splash ───────────────────────────────────────────────────────────
 
   if (generating || previewLoading) {
@@ -230,6 +242,9 @@ export default function CreateDocumentContent() {
           quoteId={quoteId} setQuoteId={setQuoteId}
           quoteIdFocused={quoteIdFocused} setQuoteIdFocused={setQuoteIdFocused}
           isSavingQuoteId={isSavingQuoteId} onSaveQuoteId={onSaveQuoteId}
+          hpeLegalEntity={hpeLegalEntity} setHpeLegalEntity={setHpeLegalEntity}
+          hpeLegalEntityFocused={hpeLegalEntityFocused} setHpeLegalEntityFocused={setHpeLegalEntityFocused}
+          isSavingHpeLegalEntity={isSavingHpeLegalEntity} onSaveHpeLegalEntity={onSaveHpeLegalEntity}
           opeId={opeId} newOpeId={newOpeId} setNewOpeId={setNewOpeId}
           isEditingOpeId={isEditingOpeId} setIsEditingOpeId={setIsEditingOpeId}
           isSaving={isSaving} isChangingOpeId={isChangingOpeId}

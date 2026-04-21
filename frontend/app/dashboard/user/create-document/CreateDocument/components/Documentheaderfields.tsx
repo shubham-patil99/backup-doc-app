@@ -40,6 +40,14 @@ interface DocumentHeaderFieldsProps {
   isSavingQuoteId: boolean;
   onSaveQuoteId: () => void;
 
+  // HPE Legal Entity
+  hpeLegalEntity: string;
+  setHpeLegalEntity: (v: string) => void;
+  hpeLegalEntityFocused: boolean;
+  setHpeLegalEntityFocused: (v: boolean) => void;
+  isSavingHpeLegalEntity: boolean;
+  onSaveHpeLegalEntity: () => void;
+
   // OPE ID
   opeId: string;
   newOpeId: string;
@@ -66,6 +74,9 @@ export default function DocumentHeaderFields({
   quoteId, setQuoteId,
   quoteIdFocused, setQuoteIdFocused,
   isSavingQuoteId, onSaveQuoteId,
+  hpeLegalEntity, setHpeLegalEntity,
+  hpeLegalEntityFocused, setHpeLegalEntityFocused,
+  isSavingHpeLegalEntity, onSaveHpeLegalEntity,
   opeId, newOpeId, setNewOpeId,
   isEditingOpeId, setIsEditingOpeId,
   isSaving, isChangingOpeId, setErrors,
@@ -74,66 +85,91 @@ export default function DocumentHeaderFields({
   return (
     <div className="mb-3 p-3 bg-white rounded-xl shadow-sm">
       {/* Row 1: Document Name + Customer */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-2">
-        {/* Document Name */}
-        <div className="md:col-span-2">
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Document Name</label>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={documentName}
-              onChange={(e) => setDocumentName(e.target.value)}
-              onFocus={() => setDocumentNameFocused(true)}
-              onBlur={() => !isSavingDocumentName && setDocumentNameFocused(false)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-            {documentNameFocused && (
-              <button
-                onMouseDown={onSaveDocumentName}
-                disabled={isSavingDocumentName}
-                className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap disabled:bg-gray-400"
-              >
-                {isSavingDocumentName ? "Saving..." : "Save"}
-              </button>
-            )}
-          </div>
-        </div>
+     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
+  {/* Document Name */}
+  <div>
+    <label className="block text-sm font-semibold text-gray-700 mb-2">Document Name</label>
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        value={documentName}
+        onChange={(e) => setDocumentName(e.target.value)}
+        onFocus={() => setDocumentNameFocused(true)}
+        onBlur={() => !isSavingDocumentName && setDocumentNameFocused(false)}
+        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+      {documentNameFocused && (
+        <button
+          onMouseDown={onSaveDocumentName}
+          disabled={isSavingDocumentName}
+          className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap disabled:bg-gray-400"
+        >
+          {isSavingDocumentName ? "Saving..." : "Save"}
+        </button>
+      )}
+    </div>
+  </div>
 
-        {/* Customer No */}
-        <div className="md:col-span-2">
-          <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-            <span>Customer</span>
-            <span className={`ml-2 text-xm font-small ${errors?.customerNo ? "text-red-600" : "text-green-700"}`}>
-              {errors?.customerNo || customerName || ""}
-            </span>
-          </label>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={customerNo}
-              onChange={(e) => setCustomerNo(e.target.value.replace(/\D/g, ""))}
-              onFocus={() => setCustomerNoFocused(true)}
-              onBlur={async () => {
-                if (!isSavingCustomerNo) {
-                  await fetchCustomerDetails();
-                  setCustomerNoFocused(false);
-                }
-              }}
-              placeholder="Customer Number"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-            {customerNoFocused && (
-              <button
-                onMouseDown={onSaveCustomerNo}
-                disabled={isSavingCustomerNo}
-                className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap disabled:bg-gray-400 flex-shrink-0"
-              >
-                {isSavingCustomerNo ? "Saving..." : "Save"}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+  {/* Customer No */}
+  <div>
+    <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+      <span>Customer</span>
+      <span className={`ml-2 text-xm font-small ${errors?.customerNo ? "text-red-600" : "text-green-700"}`}>
+        {errors?.customerNo || customerName || ""}
+      </span>
+    </label>
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        value={customerNo}
+        onChange={(e) => setCustomerNo(e.target.value.replace(/\D/g, ""))}
+        onFocus={() => setCustomerNoFocused(true)}
+        onBlur={async () => {
+          if (!isSavingCustomerNo) {
+            await fetchCustomerDetails();
+            setCustomerNoFocused(false);
+          }
+        }}
+        placeholder="Customer Number"
+        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+      {customerNoFocused && (
+        <button
+          onMouseDown={onSaveCustomerNo}
+          disabled={isSavingCustomerNo}
+          className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap disabled:bg-gray-400 flex-shrink-0"
+        >
+          {isSavingCustomerNo ? "Saving..." : "Save"}
+        </button>
+      )}
+    </div>
+  </div>
+
+  {/* HPE Legal Entity — moved here from Row 3 */}
+  <div>
+    <label className="block text-sm font-semibold text-gray-700 mb-2">HPE Legal Entity</label>
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        value={hpeLegalEntity}
+        placeholder="Enter HPE Legal Entity"
+        onChange={(e) => setHpeLegalEntity(e.target.value)}
+        onFocus={() => setHpeLegalEntityFocused(true)}
+        onBlur={() => !isSavingHpeLegalEntity && setHpeLegalEntityFocused(false)}
+        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+      {hpeLegalEntityFocused && (
+        <button
+          onMouseDown={onSaveHpeLegalEntity}
+          disabled={isSavingHpeLegalEntity}
+          className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap disabled:bg-gray-400"
+        >
+          {isSavingHpeLegalEntity ? "Saving..." : "Save"}
+        </button>
+      )}
+    </div>
+  </div>
+</div>
 
       {/* Row 2: Contracting Party + Quote ID + OPE ID */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -59,7 +59,8 @@ export const replaceTags = (text: string, vars: any) => {
     .replace(/{{\s*partnerName\s*}}/gi, partner)
     .replace(/{{\s*partnerOrCustomerName\s*}}/gi, partner || cust)
     .replace(/{{\s*documentName\s*}}/gi, vars.documentName || "")
-    .replace(/{{\s*opeId\s*}}/gi, vars.opeId || "");
+    .replace(/{{\s*opeId\s*}}/gi, vars.opeId || "")
+    .replace(/{{\s*hpeLegalEntity\s*}}/gi, vars.hpeLegalEntity || "");
 };
 
 export const normalizeInlineLists = (html = "") => {

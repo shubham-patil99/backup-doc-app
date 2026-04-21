@@ -4,13 +4,13 @@
 import { useState, useEffect } from "react";
 import { Box, Button, Image, Text } from "grommet";
 import { Logout } from "grommet-icons";
-import logo from "../../../assets/hpe-logo.png";
 
 // Existing tabs
 import SectionsTab from "./sections/SectionsTab";
 import ModulesTab from "./modules/ModulesTab";
 import UsersTab from "./users/UsersTab";
 import PermissionsTab from "./permissions/PermissionsTab";
+import SettingsPage from "./settings/page";
 
 // 👇 New Engagement Tab
 import CustomerTab from "./engagement/CustomerTab";
@@ -22,13 +22,14 @@ const tabItems = [
   { label: "Users", component: UsersTab },
   { label: "Customer Db", component: CustomerTab }, // ✅ added
   { label: "All OPEs", component: OpeTab }, 
-  // { label: "Permissions", component: PermissionsTab },
+  { label: "Settings", component: SettingsPage },
 ];
 
 export default function AdminDashboardContent() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [initials, setInitials] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
 
   // Extract user initials from localStorage
   useEffect(() => {
@@ -44,6 +45,29 @@ export default function AdminDashboardContent() {
         setInitials(generatedInitials);
       }
     }
+  }, []);
+
+  // Fetch logo from backend
+  useEffect(() => {
+    const fetchLogo = async () => {
+      try {
+        // Use relative API path - Next.js will proxy to backend
+        const response = await fetch("/api/settings/logo/file", {
+          credentials: "include",
+        });
+        if (response.ok) {
+          const blob = await response.blob();
+          const logoBlob = URL.createObjectURL(blob);
+          setLogoUrl(logoBlob);
+        } else {
+          console.error(`Failed to fetch logo: ${response.status}`);
+        }
+      } catch (err) {
+        console.error("Failed to fetch logo:", err);
+      }
+    };
+
+    fetchLogo();
   }, []);
 
   const handleLogout = () => {
@@ -68,7 +92,7 @@ export default function AdminDashboardContent() {
       >
         {/* Left Logo */}
          <div className="flex items-center gap-2">
-            <Image src={logo.src} alt="HPE Logo" width="80px" height="80px" />
+            {logoUrl && <Image src={logoUrl} alt="HPE Logo" width="80px" height="80px" />}
             <Text size="small" color="#fff" className="text-center sm:text-left text-sm font-bold sm:text-base">
               Brahma
             </Text>
@@ -144,7 +168,7 @@ export default function AdminDashboardContent() {
                 }}
               >
                 <Text size="12px" color="#1f2937" weight="bold">
-                  brahma_2026.04_IT3
+                  brahma_2026.04_IT4
                 </Text>
               </Box>
             </Box>

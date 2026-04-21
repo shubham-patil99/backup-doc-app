@@ -83,6 +83,11 @@ const Draft = sequelize.define("Draft", {
     allowNull: true,
     field: "quote_id",
   },
+  hpeLegalEntity: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    field: "hpe_legal_entity",
+  },
 }, {
   tableName: "drafts",
   timestamps: true,
