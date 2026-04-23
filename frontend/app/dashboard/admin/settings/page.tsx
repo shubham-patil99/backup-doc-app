@@ -12,9 +12,12 @@ const Toast = ({ message, type = "success", onClose }) => {
     return () => clearTimeout(timer);
   }, [onClose]);
 
-  const bgColor = type === "success" ? "bg-green-500" : type === "error" ? "bg-red-500" : "bg-blue-500";
+  const bgColor =
+    type === "success" ? "bg-green-500" : type === "error" ? "bg-red-500" : "bg-blue-500";
   return (
-    <div className={`fixed bottom-4 right-4 ${bgColor} text-white px-4 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2`}>
+    <div
+      className={`fixed bottom-4 right-4 ${bgColor} text-white px-4 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2`}
+    >
       {type === "success" && <Check className="h-5 w-5" />}
       {type === "error" && <AlertCircle className="h-5 w-5" />}
       {message}
@@ -32,29 +35,23 @@ export default function SettingsPage() {
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [templateLoading, setTemplateLoading] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [downloadingTemplate, setDownloadingTemplate] = useState<string | null>(null);
 
   const [toast, setToast] = useState<{ message: string; type: string } | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
 
-  // ─── Fetch current logo ──────────────────────────────────────────────────────
   useEffect(() => {
     fetchLogo();
     fetchTemplates();
   }, []);
 
+  // ─── Fetch current logo ──────────────────────────────────────────────────────
   const fetchLogo = async () => {
     try {
-      // Use relative API path - Next.js will proxy to backend
-      const response = await fetch("/api/settings/logo/file", {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const blob = await response.blob();
-        const logoBlob = URL.createObjectURL(blob);
-        setLogo(logoBlob);
-      } else {
-        console.error(`Failed to fetch logo: ${response.status}`);
+      const blob = await apiFetch("/settings/logo/file", { credentials: "include", responseType: "blob" });
+      if (blob) {
+        setLogo(URL.createObjectURL(blob));
       }
     } catch (err) {
       console.error("Failed to fetch logo:", err);
@@ -64,48 +61,30 @@ export default function SettingsPage() {
   // ─── Fetch available templates ───────────────────────────────────────────────
   const fetchTemplates = async () => {
     try {
-      const response = await fetch("/api/settings/templates", {
-        credentials: "include",
-      });
-      
-      if (response.ok) {
-        const templates = await response.json();
-        if (Array.isArray(templates)) {
-          setTemplates(templates);
-        }
-      } else {
-        console.error(`Failed to fetch templates: ${response.status}`);
-      }
+      const data = await apiFetch("/settings/templates", { credentials: "include" });
+      if (Array.isArray(data)) setTemplates(data);
     } catch (err) {
       console.error("Failed to fetch templates:", err);
     }
   };
 
   // ─── Logo handlers ──────────────────────────────────────────────────────────
-
   const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
     if (!["image/png", "image/jpeg"].includes(file.type)) {
       showToast("Only PNG and JPG files are allowed", "error");
       return;
     }
-
-    // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       showToast("File size must be less than 5MB", "error");
       return;
     }
 
     setLogoFile(file);
-
-    // Show preview
     const reader = new FileReader();
-    reader.onload = (event) => {
-      setLogoPreview(event.target?.result as string);
-    };
+    reader.onload = (event) => setLogoPreview(event.target?.result as string);
     reader.readAsDataURL(file);
   };
 
@@ -114,33 +93,22 @@ export default function SettingsPage() {
       showToast("Please select a logo file", "error");
       return;
     }
-
     setLogoLoading(true);
     try {
       const formData = new FormData();
       formData.append("logo", logoFile);
 
-      // Use Next.js API proxy route
-      const response = await fetch("/api/settings/logo", {
+      const result = await apiFetch("/settings/logo", {
         method: "POST",
         body: formData,
-        credentials: "include", // Include httpOnly cookies
+        credentials: "include",
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData?.error || "Failed to upload logo");
-      }
-
-      const result = await response.json();
       setLogo(result.logoUrl);
       setLogoFile(null);
       setLogoPreview(null);
       showToast("Logo updated successfully!", "success");
-
-      if (logoInputRef.current) {
-        logoInputRef.current.value = "";
-      }
+      if (logoInputRef.current) logoInputRef.current.value = "";
     } catch (err) {
       console.error("Logo upload error:", err);
       showToast(err instanceof Error ? err.message : "Failed to upload logo", "error");
@@ -152,30 +120,26 @@ export default function SettingsPage() {
   const handleCancelLogoPreview = () => {
     setLogoFile(null);
     setLogoPreview(null);
-    if (logoInputRef.current) {
-      logoInputRef.current.value = "";
-    }
+    if (logoInputRef.current) logoInputRef.current.value = "";
   };
 
   // ─── Template handlers ──────────────────────────────────────────────────────
-
   const handleTemplateSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    const validTypes = ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation"];
+    const validTypes = [
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ];
     if (!validTypes.includes(file.type)) {
       showToast("Only DOCX and PPTX files are allowed", "error");
       return;
     }
-
-    // Validate file size (max 20MB)
     if (file.size > 20 * 1024 * 1024) {
       showToast("File size must be less than 20MB", "error");
       return;
     }
-
     setTemplateFile(file);
   };
 
@@ -184,33 +148,23 @@ export default function SettingsPage() {
       showToast("Please select a template to replace", "error");
       return;
     }
-
     setTemplateLoading(true);
     try {
       const formData = new FormData();
       formData.append("template", templateFile);
       formData.append("templateName", selectedTemplate);
 
-      // Use Next.js API proxy route
-      const response = await fetch("/api/settings/templates", {
+      await apiFetch("/settings/templates", {
         method: "POST",
         body: formData,
-        credentials: "include", // Include httpOnly cookies
+        credentials: "include",
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData?.error || "Failed to upload template");
-      }
 
       await fetchTemplates();
       setTemplateFile(null);
       setSelectedTemplate(null);
       showToast("Template updated successfully!", "success");
-
-      if (templateInputRef.current) {
-        templateInputRef.current.value = "";
-      }
+      if (templateInputRef.current) templateInputRef.current.value = "";
     } catch (err) {
       console.error("Template upload error:", err);
       showToast(err instanceof Error ? err.message : "Failed to upload template", "error");
@@ -219,32 +173,56 @@ export default function SettingsPage() {
     }
   };
 
+  // ─── Download handler ────────────────────────────────────────────────────────
+  const handleDownloadTemplate = async (
+    e: React.MouseEvent,
+    templateName: string
+  ) => {
+    // Prevent the row click (which sets selectedTemplate) from firing
+    e.stopPropagation();
+    setDownloadingTemplate(templateName);
+    try {
+      const blob = await apiFetch(
+        `/settings/templates/${encodeURIComponent(templateName)}/download`,
+        { credentials: "include", responseType: "blob" }
+      );
+
+      if (!blob) throw new Error("Download failed");
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = templateName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Template downloaded successfully!", "success");
+    } catch (err) {
+      console.error("Template download error:", err);
+      showToast("Failed to download template", "error");
+    } finally {
+      setDownloadingTemplate(null);
+    }
+  };
+
   const handleDeleteTemplate = async (templateName: string) => {
     if (!window.confirm(`Delete template: ${templateName}?`)) return;
-
     try {
-      const response = await fetch(`/api/settings/templates/${encodeURIComponent(templateName)}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-
-      if (response.ok) {
-        await fetchTemplates();
-        showToast("Template deleted successfully!", "success");
-      } else {
-        throw new Error("Failed to delete template");
-      }
+      await apiFetch(
+        `/settings/templates/${encodeURIComponent(templateName)}`,
+        { method: "DELETE", credentials: "include" }
+      );
+      await fetchTemplates();
+      showToast("Template deleted successfully!", "success");
     } catch (err) {
       console.error("Template delete error:", err);
       showToast("Failed to delete template", "error");
     }
   };
 
-  const showToast = (message: string, type: string) => {
-    setToast({ message, type });
-  };
+  const showToast = (message: string, type: string) => setToast({ message, type });
 
-  // ─── Helper to determine template type ───────────────────────────────────────
   const getTemplateType = (fileName: string) => {
     if (fileName.endsWith(".docx")) return "DOCX";
     if (fileName.endsWith(".pptx")) return "PPTX";
@@ -252,7 +230,6 @@ export default function SettingsPage() {
   };
 
   // ─── Render ──────────────────────────────────────────────────────────────────
-
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-6xl mx-auto">
@@ -264,6 +241,7 @@ export default function SettingsPage() {
 
         {/* Two-column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
           {/* ── LOGO SECTION ── */}
           <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
             <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
@@ -369,15 +347,48 @@ export default function SettingsPage() {
                           : "border-gray-200 bg-gray-50 hover:border-gray-300"
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3 flex-1">
-                          <FileText className={`h-5 w-5 ${getTemplateType(template.name) === "DOCX" ? "text-blue-500" : "text-orange-500"}`} />
+                      <div className="flex items-center justify-between gap-2">
+                        {/* Left: icon + name + meta */}
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <FileText
+                            className={`h-5 w-5 shrink-0 ${
+                              getTemplateType(template.name) === "DOCX"
+                                ? "text-blue-500"
+                                : "text-orange-500"
+                            }`}
+                          />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">{template.name}</p>
-                            <p className="text-xs text-gray-600">{getTemplateType(template.name)} • {(template.size / 1024).toFixed(2)} KB</p>
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {template.name}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              {getTemplateType(template.name)} •{" "}
+                              {(template.size / 1024).toFixed(2)} KB
+                            </p>
                           </div>
                         </div>
-                        {selectedTemplate === template.name && <Check className="h-5 w-5 text-green-600" />}
+
+                        {/* Right: download button + selected checkmark */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* Download button */}
+                          <button
+                            onClick={(e) => handleDownloadTemplate(e, template.name)}
+                            disabled={downloadingTemplate === template.name}
+                            title={`Download ${template.name}`}
+                            className="p-1.5 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                          >
+                            {downloadingTemplate === template.name ? (
+                              <Loader className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4" />
+                            )}
+                          </button>
+
+                          {/* Selected indicator */}
+                          {selectedTemplate === template.name && (
+                            <Check className="h-5 w-5 text-green-600" />
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))
@@ -407,11 +418,18 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Upload Button */}
+            {/* Upload / Replace Button */}
             {templateFile && selectedTemplate && (
               <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <p className="text-sm text-yellow-800 mb-3">
-                  ⚠️ This will replace: <strong>{selectedTemplate}</strong>
+                  ⚠️ This will replace:{" "}
+                  <strong>{selectedTemplate}</strong>
+                  {selectedTemplate.endsWith(".docx") && (
+                    <span className="block text-xs text-yellow-700 mt-1">
+                      Content (placeholders, formatting, tables, headers/footers) from the
+                      existing template will be migrated into the new one.
+                    </span>
+                  )}
                 </p>
                 <button
                   onClick={handleUploadTemplate}
@@ -421,7 +439,7 @@ export default function SettingsPage() {
                   {templateLoading ? (
                     <>
                       <Loader className="h-4 w-4 animate-spin" />
-                      Uploading...
+                      Uploading &amp; Migrating...
                     </>
                   ) : (
                     <>
@@ -438,11 +456,7 @@ export default function SettingsPage() {
 
       {/* Toast notification */}
       {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
+        <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
     </div>
   );

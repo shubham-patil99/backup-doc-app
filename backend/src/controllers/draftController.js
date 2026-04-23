@@ -318,6 +318,7 @@ exports.saveDocument = async (req, res) => {
       fileName,
       sowType,
       quoteId,
+      hpeLegalEntity,
     } = req.body;
 
     const finalAddress = customerAddress || addresses || null;
@@ -384,6 +385,7 @@ exports.saveDocument = async (req, res) => {
           content,
           status: "draft",
           fileName,
+          hpeLegalEntity: hpeLegalEntity || existingDraft.hpeLegalEntity || null,
         });
         await existingDraft.reload();
         const existingJson = existingDraft.toJSON();
@@ -405,6 +407,7 @@ exports.saveDocument = async (req, res) => {
         version: nextVersion,
         fileName,
         quoteId: prevQuoteId || null,
+        hpeLegalEntity: hpeLegalEntity || lastDraft?.hpeLegalEntity || null,
       });
       const draftJson2 = draft.toJSON();
       draftJson2.customerNo = await getCustomerNoByName(draftJson2.customerName);
@@ -488,6 +491,7 @@ exports.getAllDrafts = async (req, res) => {
         customerNo: obj.customerNo,
         customerEmail: obj.customerEmail || "",
         partnerName: obj.partnerName || "",
+        hpeLegalEntity: obj.hpeLegalEntity || "",
         customerAddress: obj.customerAddress || "",
         engagementResources: obj.engagementResources || [],
         content: obj.content || {},
@@ -558,7 +562,7 @@ exports.getDraftByOpe = async (req, res) => {
     const draft = await Draft.findOne({
       where: whereClause,
       order: [["version", "DESC"]],
-      attributes: ['id', 'opeId', 'userId', 'customerName', 'customerEmail', 'partnerName', 'customerAddress', 'content', 'sowType', 'status', 'version', 'fileName', 'quoteId', 'createdAt', 'updatedAt']
+      attributes: ['id', 'opeId', 'userId', 'customerName', 'customerEmail', 'partnerName', 'customerAddress', 'content', 'sowType', 'status', 'version', 'fileName', 'quoteId', 'hpeLegalEntity', 'createdAt', 'updatedAt']
     });
     
     console.log("[getDraftByOpe] Draft found:", draft ? `Yes (sowType: ${draft.sowType})` : "No");
