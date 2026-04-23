@@ -464,6 +464,7 @@ exports.generateDocument = async (req, res) => {
       customerAddress,
       partnerName,
       quoteId,
+      hpeLegalEntity,
       sections: reqSections,
       assigned: reqAssigned,
       documentTitle,
@@ -612,6 +613,7 @@ exports.generateDocument = async (req, res) => {
         quoteId || draft.quoteId
           ? `Quote Id - ${quoteId || draft.quoteId}`
           : "",
+      hpeLegalEntity: sanitizeXmlChars(hpeLegalEntity || draft.hpeLegalEntity || ""),
       opeId: sanitizeXmlChars(opeId || draft.opeId || ""),
       documentTitle: sanitizeXmlChars(
         documentTitle ||
@@ -656,6 +658,7 @@ exports.generateDocument = async (req, res) => {
         templateData.partnerName || templateData.customerName || "",
       "{{opeId}}": templateData.opeId || "",
       "{{quoteId}}": templateData.quoteId || "",
+      "{{hpeLegalEntity}}": templateData.hpeLegalEntity || "",
     };
     Object.keys(zipAfter.files).forEach((fname) => {
       if (!fname.endsWith(".xml")) return;

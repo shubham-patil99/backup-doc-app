@@ -230,6 +230,7 @@ export default function GenerateDocumentModal({
       customerEmail: versionData.customerEmail || "",
       customerAddress: versionData.customerAddress || "",
       partnerName: versionData.partnerName || versionData.content?.partnerName || "",
+      hpeLegalEntity: versionData.hpeLegalEntity || versionData.content?.hpeLegalEntity || "",
       documentTitle: `${documentName} (${versionData.status} v${versionData.version})`,
       status: versionData.status || "final",
       version: versionData.version,

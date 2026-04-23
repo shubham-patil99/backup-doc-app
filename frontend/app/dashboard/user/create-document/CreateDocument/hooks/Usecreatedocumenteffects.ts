@@ -30,6 +30,7 @@ export function useCreateDocumentEffects(state: any, actions: any) {
     sowSize, setSowSize,
     documentName, setDocumentName,
     quoteId, setQuoteId,
+    hpeLegalEntity, setHpeLegalEntity,
     version, setVersion,
     initialDraftLoadedRef,
     dataFetchedAfterLoadRef,
@@ -110,6 +111,7 @@ export function useCreateDocumentEffects(state: any, actions: any) {
       setNewOpeId(currentOpeId);
       setCustomerName(customerInfo?.customerName || "");
       setCustomerNo(customerInfo?.customerNo || "");
+      setHpeLegalEntity(customerInfo?.hpeLegalEntity || "");
       const partnerValue = customerInfo?.partnerName || customerInfo?.contractingParty || "";
       setContractingParty(partnerValue);
       setPartnerName(partnerValue);
@@ -213,6 +215,7 @@ export function useCreateDocumentEffects(state: any, actions: any) {
           }
 
           if (source.quoteId) setQuoteId(source.quoteId);
+          if (source.hpeLegalEntity) setHpeLegalEntity(source.hpeLegalEntity);
           const loadedSowType =
             source.sowType === "SMALL" ? "small" : source.sowType === "PROPOSAL" ? "proposal" : "full";
           setSowSize(loadedSowType);

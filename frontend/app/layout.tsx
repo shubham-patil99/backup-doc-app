@@ -3,7 +3,7 @@ import { AuthProvider } from '../context/AuthContext';
 import '../styles/html-content.css';
 
 export const metadata = {
-  title: 'HPE Document Creator',
+  title: 'Brahma',
   description: 'JWT Auth + Role Based App',
 };
 

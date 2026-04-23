@@ -35,7 +35,8 @@ export const replaceTags = (
     .replace(/{{\s*partnerName\s*}}/gi, partner)
     .replace(/{{\s*partnerOrCustomerName\s*}}/gi, partnerOrCustomer)
     .replace(/{{\s*documentName\s*}}/gi, documentName || "")
-    .replace(/{{\s*opeId\s*}}/gi, opeId || "");
+    .replace(/{{\s*opeId\s*}}/gi, opeId || "")
+    .replace(/{{\s*hpeLegalEntity\s*}}/gi, vars.hpeLegalEntity || "");
 };
 
 export const formatDateOnly = (date = new Date()) => {

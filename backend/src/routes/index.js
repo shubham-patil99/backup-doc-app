@@ -14,6 +14,7 @@ const engagementRoutes = require("./engagementRoutes");
 const finalsRoutes = require('./finals');
 const templateRoutes = require("./templateRoutes");
 const RenderRoutes = require("./renderRoutes");
+const settingsRoutes = require("./settingsRoutes");
 
 const router = express.Router();
 
@@ -33,5 +34,6 @@ router.use("/engagement", engagementRoutes);
 router.use('/customers', customerRoutes);
 router.use("/templates", templateRoutes);
 router.use("/render", RenderRoutes);
+router.use("/settings", settingsRoutes);
 
 module.exports = router;

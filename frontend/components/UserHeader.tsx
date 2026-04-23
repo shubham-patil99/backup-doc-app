@@ -54,7 +54,7 @@ export default function UserHeader({ username }) {
                   Logout
                 </button>
                 <div className="px-4 py-1 bg-gray-50 border-t border-gray-100">
-                  <p className="text-[12px] text-gray-800 font-semibold">brahma_2026.04_IT3</p>
+                  <p className="text-[12px] text-gray-800 font-semibold">brahma_2026.04_IT4</p>
                 </div>
               </div>
             )}

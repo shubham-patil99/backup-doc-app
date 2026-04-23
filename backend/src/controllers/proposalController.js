@@ -91,6 +91,7 @@ exports.generateProposal = async (req, res) => {
       customerName = draft.customerName || "",
       partnerName  = draft.partnerName  || "",
       quoteId      = draft.quoteId      || "",
+      hpeLegalEntity = draft.hpeLegalEntity || "",
       sections:  reqSections = [],
       assigned:  reqAssigned = {},
       createdAtFormatted,
@@ -262,6 +263,7 @@ exports.generateProposal = async (req, res) => {
         "{{partnerOrCustomerName}}": partnerName || customerName || "",
         "{{opeId}}": opeId || "",
         "{{quoteId}}": quoteId || "",
+        "{{hpeLegalEntity}}": hpeLegalEntity || "",
       };
 
       Object.keys(zipPptx.files).forEach((fname) => {

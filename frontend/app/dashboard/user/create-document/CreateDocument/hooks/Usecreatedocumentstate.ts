@@ -20,6 +20,7 @@ export function useCreateDocumentState() {
   const [partnerName, setPartnerName] = useState("");
   const [opeId, setOpeId] = useState("");
   const [quoteId, setQuoteId] = useState<string | null>(null);
+  const [hpeLegalEntity, setHpeLegalEntity] = useState("");
   const [version, setVersion] = useState(0);
 
   // ── SoW type ─────────────────────────────────────────────────────────────────
@@ -49,6 +50,8 @@ export function useCreateDocumentState() {
   const [isSavingContractingParty, setIsSavingContractingParty] = useState(false);
   const [quoteIdFocused, setQuoteIdFocused] = useState(false);
   const [isSavingQuoteId, setIsSavingQuoteId] = useState(false);
+  const [hpeLegalEntityFocused, setHpeLegalEntityFocused] = useState(false);
+  const [isSavingHpeLegalEntity, setIsSavingHpeLegalEntity] = useState(false);
 
   // ── Modal state ──────────────────────────────────────────────────────────────
   const [showPreview, setShowPreview] = useState(false);
@@ -115,6 +118,7 @@ export function useCreateDocumentState() {
     partnerName, setPartnerName,
     opeId, setOpeId,
     quoteId, setQuoteId,
+    hpeLegalEntity, setHpeLegalEntity,
     version, setVersion,
     // SoW type
     sowSize, setSowSize,
@@ -141,6 +145,8 @@ export function useCreateDocumentState() {
     isSavingContractingParty, setIsSavingContractingParty,
     quoteIdFocused, setQuoteIdFocused,
     isSavingQuoteId, setIsSavingQuoteId,
+    hpeLegalEntityFocused, setHpeLegalEntityFocused,
+    isSavingHpeLegalEntity, setIsSavingHpeLegalEntity,
     // Modals
     showPreview, setShowPreview,
     previewPdfUrl, setPreviewPdfUrl,
