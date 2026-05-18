@@ -48,18 +48,25 @@ exports.getUserDashboardData = async (req, res) => {
   };
 });
 
-
+console.log("Merged data:", merged);
     // Apply search filter (on OPE ID + customer name/email)
-    const filtered = search
-      ? merged.filter(
-          (r) =>
-          r.opeId.toLowerCase().includes(search) ||
-          r.draftCustomer?.name?.toLowerCase().includes(search) ||
-          r.draftCustomer?.email?.toLowerCase().includes(search) ||
-          r.documentCustomer?.name?.toLowerCase().includes(search) ||
-          r.documentCustomer?.email?.toLowerCase().includes(search)
-        )
-      : merged;
+const filtered = search
+  ? merged.filter((r) => {
+      const opeId = r.opeId?.toLowerCase() || "";
+      const draftName = r.draftCustomer?.name?.toLowerCase() || "";
+      const draftEmail = r.draftCustomer?.email?.toLowerCase() || "";
+      const docName = r.documentCustomer?.name?.toLowerCase() || "";
+      const docEmail = r.documentCustomer?.email?.toLowerCase() || "";
+
+      return (
+        opeId.includes(search) ||
+        draftName.includes(search) ||
+        draftEmail.includes(search) ||
+        docName.includes(search) ||
+        docEmail.includes(search)
+      );
+    })
+  : merged;
 
     // Sort merged results by createdAt (latest first)
     filtered.sort((a, b) => {
@@ -83,6 +90,7 @@ exports.getUserDashboardData = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching dashboard data:", error);
+    console.error("Dashboard API Error:", error);
     res
       .status(500)
       .json({ success: false, error: "Failed to fetch user dashboard data" });

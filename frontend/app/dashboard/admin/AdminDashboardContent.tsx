@@ -51,8 +51,8 @@ export default function AdminDashboardContent() {
   useEffect(() => {
     const fetchLogo = async () => {
       try {
-        // Use relative API path - Next.js will proxy to backend
-        const response = await fetch("/api/settings/logo/file", {
+        // Add cache-busting parameter to always get fresh logo
+        const response = await fetch(`/api/settings/logo/file?t=${Date.now()}`, {
           credentials: "include",
         });
         if (response.ok) {
@@ -68,6 +68,13 @@ export default function AdminDashboardContent() {
     };
 
     fetchLogo();
+
+    // Listen for logo updates from other tabs/windows
+    const handleStorageChange = () => {
+      fetchLogo();
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   const handleLogout = () => {

@@ -101,4 +101,3 @@ const Draft = sequelize.define("Draft", {
 });
 
 module.exports = Draft;
- 

@@ -8,9 +8,40 @@ import { color } from "jodit/esm/plugins/color/color";
 export default function UserHeader({ username }) {
   const [hydrated, setHydrated] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
+  const [logoUrl, setLogoUrl] = useState("");
 
   useEffect(() => {
     setHydrated(true);
+  }, []);
+
+  // Fetch logo from backend
+  useEffect(() => {
+    const fetchLogo = async () => {
+      try {
+        // Add cache-busting parameter to always get fresh logo
+        const response = await fetch(`/api/settings/logo/file?t=${Date.now()}`, {
+          credentials: "include",
+        });
+        if (response.ok) {
+          const blob = await response.blob();
+          const logoBlob = URL.createObjectURL(blob);
+          setLogoUrl(logoBlob);
+        } else {
+          console.error(`Failed to fetch logo: ${response.status}`);
+        }
+      } catch (err) {
+        console.error("Failed to fetch logo:", err);
+      }
+    };
+
+    fetchLogo();
+
+    // Listen for logo updates from other tabs/windows
+    const handleStorageChange = () => {
+      fetchLogo();
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   const handleLogout = () => {
@@ -26,8 +57,12 @@ export default function UserHeader({ username }) {
     <div className="bg-gray-900 shadow-sm border-b border-gray-700">
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         {/* Left Section */}
-        <div className="flex items-center gap-3">
-          <img src={logo.src} alt="HPE Logo" width={70} height={70} />
+      <div className="flex items-center gap-3">
+          {logoUrl ? (
+            <img src={logoUrl} alt="HPE Logo" width={70} height={70} />
+          ) : (
+            <img src={logo.src} alt="HPE Logo" width={70} height={70} />
+          )}
           <span className="text-xl font-bold text-white">Brahma</span>
         </div>
 
