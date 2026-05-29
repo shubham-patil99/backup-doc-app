@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { apiFetch } from "@/lib/apiClient";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {

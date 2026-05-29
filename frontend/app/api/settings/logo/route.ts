@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/apiClient";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {

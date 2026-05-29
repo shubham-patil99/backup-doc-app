@@ -26,8 +26,8 @@ exports.login = async (req, res) => {
       maxAge: 1000 * 60 * 60 * 24, // 1 day
     });
 
-res.cookie('role', user.role_id, {
-  httpOnly: false,     // frontend JS needs to read this
+res.cookie('role', role.toString(), {
+  httpOnly: false,
   secure: false,
   sameSite: 'lax',
   maxAge: 24 * 60 * 60 * 1000,
