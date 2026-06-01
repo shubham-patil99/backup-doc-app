@@ -59,7 +59,8 @@ exports.autoSaveDraft = async (req, res) => {
                   description: module.description || "",
                   sectionId: section.id,
                   position: Number.isFinite(Number(module.position)) ? Number(module.position) : idx,
-                  canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : false
+                  canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : false,
+                  instanceId: (module.instanceId && module.instanceId !== "null") ? module.instanceId : null,
                 }))
               : []
           }))
@@ -79,7 +80,7 @@ exports.autoSaveDraft = async (req, res) => {
     const effectiveSowType = sowType || 'FULL';
     console.log("📝 Searching for draft with sowType:", effectiveSowType);
     const latestDraft = await Draft.findOne({
-      where: { opeId, userId, sowType: effectiveSowType },
+      where: { opeId, sowType: effectiveSowType },
       order: [["version", "DESC"]],
     });
 
@@ -94,6 +95,7 @@ exports.autoSaveDraft = async (req, res) => {
           documentName: documentName !== undefined ? documentName : latestDraft.documentName,
           quoteId: quoteId === "" ? null : (quoteId !== undefined ? quoteId : latestDraft.quoteId),
           sowType: effectiveSowType,  // ✅ ALWAYS update sowType to current value (handles type switches)
+          modifiedBy: userId,
           ...(contentUpdated ? { content: normalizedContent } : {}),
           status: status || latestDraft.status,
           ...rest
@@ -144,6 +146,7 @@ exports.autoSaveDraft = async (req, res) => {
       const createPayload = {
         opeId,
         userId,
+        modifiedBy: userId,
         customerName: customerName || null,
         partnerName: partnerName || null,
         documentName: documentName || null,
@@ -209,6 +212,7 @@ exports.autoSaveDraft = async (req, res) => {
                 partnerName: partnerName !== undefined ? partnerName : existing.partnerName,
                 documentName: documentName !== undefined ? documentName : existing.documentName,
                 sowType: effectiveSowType,  // ✅ ALWAYS update sowType (handles type switches)
+                modifiedBy: userId,
                 content: normalizedContent,
                 status: status || existing.status,
                 ...rest
@@ -473,7 +477,10 @@ exports.getAllDrafts = async (req, res) => {
     if (sowType) where.sowType = sowType.toUpperCase();
     const drafts = await Draft.findAll({
       where,
-      include: [{ model: User, as: "user", attributes: ["name", "email"] }],
+      include: [
+        { model: User, as: "user", attributes: ["name", "email"] },
+        { model: User, as: "modifier", attributes: ["name", "email"] },
+      ],
       order: [["version", "ASC"]],
     });
     const draftsWithNo = await Promise.all(drafts.map(async draft => {
@@ -485,6 +492,8 @@ exports.getAllDrafts = async (req, res) => {
         createdAt: obj.createdAt,
         userName: obj.user?.name || "",
         userEmail: obj.user?.email || "",
+        modifiedBy: obj.modifiedBy || null,
+        modifiedByName: obj.modifier?.name || obj.modifier?.email || "",
         status: obj.status,
         fileName: obj.fileName || "",
         customerName: obj.customerName || "",
@@ -562,7 +571,7 @@ exports.getDraftByOpe = async (req, res) => {
     const draft = await Draft.findOne({
       where: whereClause,
       order: [["version", "DESC"]],
-      attributes: ['id', 'opeId', 'userId', 'customerName', 'customerEmail', 'partnerName', 'customerAddress', 'content', 'sowType', 'status', 'version', 'fileName', 'quoteId', 'hpeLegalEntity', 'createdAt', 'updatedAt']
+      attributes: ['id', 'opeId', 'userId', 'modifiedBy', 'customerName', 'customerEmail', 'partnerName', 'customerAddress', 'content', 'sowType', 'status', 'version', 'fileName', 'quoteId', 'hpeLegalEntity', 'createdAt', 'updatedAt']
     });
     
     console.log("[getDraftByOpe] Draft found:", draft ? `Yes (sowType: ${draft.sowType})` : "No");

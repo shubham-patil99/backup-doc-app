@@ -77,7 +77,7 @@ export default function AvailableSection({
 
                     return (
                       <div
-                        key={module.id}
+                        key={`${section.id}_${module.id}`}
                         data-module-id={module.id}
                         data-module-name={stripHtml(module.name)}
                         data-module-desc={stripHtml(module.description || "")}

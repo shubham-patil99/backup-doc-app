@@ -51,11 +51,15 @@ export default function OpeTab() {
           opesMap.set(doc.opeId, {
             opeId: doc.opeId,
             userName: doc.userName || "N/A",
+            modifiedByName: doc.modifiedByName || "N/A",
             versions: [],
             statuses: new Set(),
           });
         }
         const opeData = opesMap.get(doc.opeId);
+        if (doc.modifiedByName) {
+          opeData.modifiedByName = doc.modifiedByName;
+        }
         opeData.versions.push({
           version: doc.version,
           status: doc.status,
@@ -168,14 +172,17 @@ export default function OpeTab() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 uppercase text-xs">
+                      <th className="text-left py-3 px-6 min-w-[90px] font-semibold text-gray-700 uppercase text-xs">
                         #
                       </th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 uppercase text-xs">
+                      <th className="text-left py-3 px-6 min-w-[180px] font-semibold text-gray-700 uppercase text-xs">
                         OPE ID
                       </th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 uppercase text-xs">
-                        User Name
+                      <th className="text-left py-3 px-6 min-w-[220px] font-semibold text-gray-700 uppercase text-xs">
+                        Created By
+                      </th>
+                      <th className="text-left py-3 px-2 font-semibold text-gray-700 uppercase text-xs">
+                        Modified By
                       </th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-700 uppercase text-xs">
                         Versions (Status)
@@ -212,8 +219,15 @@ export default function OpeTab() {
                           </div>
                         </td>
 
-                        {/* Versions with Status */}
+                        {/* Modified By */}
                         <td className="py-3 px-4">
+                          <span className="text-gray-700 font-medium">
+                            {ope.modifiedByName || "N/A"}
+                          </span>
+                        </td>
+
+                        {/* Versions with Status */}
+                        <td className="py-3 px-6">
                           <div className="space-y-1">
                             {ope.versions.map((v, vidx) => (
                               <span

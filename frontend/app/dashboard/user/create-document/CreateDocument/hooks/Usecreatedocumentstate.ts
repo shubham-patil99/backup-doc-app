@@ -24,7 +24,17 @@ export function useCreateDocumentState() {
   const [version, setVersion] = useState(0);
 
   // ── SoW type ─────────────────────────────────────────────────────────────────
-  const [sowSize, setSowSize] = useState<SowSize>("full");
+  const [sowSize, setSowSize] = useState<SowSize>(() => {
+    if (typeof window === "undefined") return "full";
+    try {
+      const currentOpeId = localStorage.getItem("currentOpeId") || "";
+      if (currentOpeId) {
+        const stored = localStorage.getItem(`sowSize_${currentOpeId}`);
+        if (stored === "full" || stored === "small" || stored === "proposal") return stored as SowSize;
+      }
+    } catch {}
+    return "full";
+  });
   const [showSowTypeWarning, setShowSowTypeWarning] = useState(false);
   const [pendingSowType, setPendingSowType] = useState<SowSize | null>(null);
 

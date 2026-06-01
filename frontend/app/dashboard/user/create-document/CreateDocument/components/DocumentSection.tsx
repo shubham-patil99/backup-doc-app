@@ -55,7 +55,7 @@ export default function DocumentSection({ section, onModuleDrop, onEditModule, d
           </div>
         ) : (
           section.modules.map(module => (
-            <div key={module.id} className="flex items-center gap-2 bg-white rounded-lg p-3 border shadow-sm group">
+            <div key={module.instanceId || `${section.id}_${module.id}`} className="flex items-center gap-2 bg-white rounded-lg p-3 border shadow-sm group">
               <div className="flex-1">
                 <h4 className="font-semibold text-sm">{module.name}</h4>
                 <div

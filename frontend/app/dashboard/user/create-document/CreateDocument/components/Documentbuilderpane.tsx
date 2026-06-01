@@ -26,7 +26,7 @@ interface DocumentBuilderPaneProps {
   onModuleDragEnd: () => void;
   onModuleDragEnter: (e: React.DragEvent, sectionId: number, index: number) => void;
   onModuleDragLeave: (e: React.DragEvent, sectionId: number, index: number) => void;
-  onModuleDrop: (e: React.DragEvent, targetSectionId: number, targetIndex: number) => void;
+  onModuleDrop: (e: React.DragEvent, targetSectionId: number, targetIndex: number, targetPosition: "before" | "after" | null) => void;
   onEditModule: (module: any, sectionId?: number, instanceId?: string) => void;
   onRemoveModule: (instanceId: string | number, sectionId: number) => void;
   onRemoveSection: (sectionId: number) => void;
@@ -152,7 +152,7 @@ export default function DocumentBuilderPane({
                     onDragEnter={(e) => onModuleDragEnter(e, section.id, moduleIndex)}
                     onDragOver={(e) => e.preventDefault()}
                     onDragLeave={(e) => onModuleDragLeave(e, section.id, moduleIndex)}
-                    onDrop={(e) => onModuleDrop(e, section.id, moduleIndex)}
+                    onDrop={(e) => onModuleDrop(e, section.id, moduleIndex, dragOver.position)}
                     className={`flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-grab transition-transform relative ${
                       dragSourceRef.current?.index === moduleIndex &&
                       dragSourceRef.current?.sectionId === section.id

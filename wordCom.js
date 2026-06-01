@@ -26,39 +26,63 @@ const os = require("os");
 // ---------------------------------------------------------------------------
 const TABLE_AUTOFIT_BLOCK = `
   # ── Table auto-fit (BULLETPROOF) ────────────────────────────────────────
-  Write-Host "Auto-fitting tables ($($doc.Tables.Count) found)..."
-  if ($doc.Tables.Count -gt 0) {
-    $tableCount = 0
-    foreach ($tbl in $doc.Tables) {
+  Write-Host "Auto-fitting tables (\$(\$doc.Tables.Count) found)..."
+  if (\$doc.Tables.Count -gt 0) {
+    \$tableCount = 0
+    foreach (\$tbl in \$doc.Tables) {
       try {
-        $tableCount++
-        Write-Host "  Processing table $($tableCount)..."
-        
-        # ✅ Step 1: AutoFit to content (wdAutoFitContent = 1)
-        Write-Host "    - Fitting columns to content..."
-        $tbl.AutoFitBehavior(1)
-        Start-Sleep -Milliseconds 200
-        
-        # ✅ Step 2: AutoFit to window (wdAutoFitWindow = 2)
-        Write-Host "    - Fitting table to window width..."
-        $tbl.AutoFitBehavior(2)
-        Start-Sleep -Milliseconds 200
-        
-        Write-Host "    - Table $($tableCount) auto-fit complete"
+        \$tableCount++
+        Write-Host "  Processing table \$(\$tableCount) (columns: \$(\$tbl.Columns.Count))..."
+
+        if (\$tbl.Columns.Count -eq 2) {
+          Write-Host "    - Two-column table detected, applying 50/50 split..."
+          \$tbl.AutoFitBehavior(0)
+          Start-Sleep -Milliseconds 100
+
+          \$pageWidth = \$doc.PageSetup.PageWidth \`
+                       - \$doc.PageSetup.LeftMargin \`
+                       - \$doc.PageSetup.RightMargin
+          try {
+            \$tblWidth = \$tbl.PreferredWidth
+            if (\$tblWidth -le 0) { \$tblWidth = \$pageWidth }
+          } catch {
+            \$tblWidth = \$pageWidth
+          }
+
+          \$half = \$tblWidth / 2
+          Write-Host "    - Table width: \$([Math]::Round(\$tblWidth,1)) pt, each column: \$([Math]::Round(\$half,1)) pt"
+
+          \$tbl.Columns.Item(1).Width = \$half
+          \$tbl.Columns.Item(2).Width = \$half
+          Start-Sleep -Milliseconds 200
+
+          Write-Host "    - Table \$(\$tableCount) 50/50 split applied"
+        } else {
+          Write-Host "    - Fitting columns to content..."
+          \$tbl.AutoFitBehavior(1)
+          Start-Sleep -Milliseconds 200
+
+          Write-Host "    - Fitting table to window width..."
+          \$tbl.AutoFitBehavior(2)
+          Start-Sleep -Milliseconds 200
+
+          Write-Host "    - Table \$(\$tableCount) auto-fit complete"
+        }
+
         Start-Sleep -Milliseconds 100
       } catch {
-        Write-Warning "Table $($tableCount) auto-fit failed: \$_"
+        Write-Warning "Table \$(\$tableCount) auto-fit failed: \$_"
       }
     }
-    
+
     # ✅ Step 3: Refresh document
     Write-Host "Refreshing document layout..."
     Start-Sleep -Milliseconds 500
     \$doc.Fields.Update() | Out-Null
     Start-Sleep -Milliseconds 300
-    
+
     # ✅ Step 4: Save changes
-    Write-Host "Saving auto-fit changes ($($tableCount) tables processed)..."
+    Write-Host "Saving auto-fit changes (\$(\$tableCount) tables processed)..."
     \$doc.Save()
     Start-Sleep -Milliseconds 500
   } else {

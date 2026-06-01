@@ -156,15 +156,24 @@ export function useCreateDocumentDataActions(state: any) {
       setIsSaving(true);
       setAutoSaveInProgress(true);
       try {
-        const normalizedSections = (newDocumentSections || []).map((section: any) => ({
-          id: section.id, title: section.title || "", description: section.description || "",
-          position: section.position,
-          modules: (section.modules || []).map((module: any) => ({
-            id: module.id, name: module.name || "",
-            description: sanitizeDescription(normalizeInlineLists(module.description || "")),
-            sectionId: section.id, position: module.position, canEdit: module.canEdit,
-          })),
-        }));
+        const normalizedSections = (newDocumentSections || []).map((section: any, sectionIdx: number) => ({
+  id: section.id,
+  title: section.title || "",
+  description: section.description || "",
+  // ✅ Always save section position using its array index
+  position: Number.isFinite(Number(section.position)) ? Number(section.position) : sectionIdx,
+  modules: (section.modules || []).map((module: any, moduleIdx: number) => ({
+    id: module.id,
+    name: module.name || "",
+    description: sanitizeDescription(normalizeInlineLists(module.description || "")),
+    sectionId: section.id,
+    // ✅ Always save module position using its array index as fallback
+    position: Number.isFinite(Number(module.position)) ? Number(module.position) : moduleIdx,
+    canEdit: module.canEdit,
+    // ✅ Save instanceId so it survives reload
+    instanceId: (module.instanceId && module.instanceId !== "null") ? module.instanceId : null,
+  })),
+}));
         const storedUser = typeof window !== "undefined"
           ? JSON.parse(localStorage.getItem("user") || "{}") : {};
         const storedOpe = typeof window !== "undefined"
@@ -224,36 +233,80 @@ export function useCreateDocumentDataActions(state: any) {
   };
 
   // ─── SoW Type ───────────────────────────────────────────────────────────────
+const loadDraftForSowType = async (newType: "full" | "small" | "proposal") => {
+  // ✅ Persist immediately so radio button survives reload
+  if (opeId && typeof window !== "undefined") {
+    localStorage.setItem(`sowSize_${opeId}`, newType);
+  }
 
-  const handleSowTypeChange = (newType: "full" | "small" | "proposal") => {
-    if (newType === sowSize) return;
-    setPendingSowType(newType);
-    setShowSowTypeWarning(true);
-  };
-
-  const confirmSowTypeChange = async () => {
-    if (!pendingSowType) return;
-    const newType = pendingSowType;
-    const oldSowType = sowSize.toUpperCase();
-    try {
-      const deleteRes = await apiFetch(`/drafts/delete-all/${opeId}/${oldSowType}`, { method: "DELETE" });
-      if (!deleteRes.success) { showToast("Failed to clear previous SoW data"); return; }
-      sowTypeChangeInProgressRef.current = true;
-      skipDraftReloadRef.current = true;
-      setShowSowTypeWarning(false);
-      setPendingSowType(null);
-      setSowSize(newType);
+  const sowTypeParam = newType === "small" ? "SMALL"
+    : newType === "proposal" ? "PROPOSAL"
+    : "FULL";
+  try {
+    const res = await apiFetch(`/drafts/${opeId}?sowType=${sowTypeParam}`);
+    if (res?.success && res.draft?.content?.documentSections) {
+      setDocumentSections(res.draft.content.documentSections);
+    } else {
       setDocumentSections([]);
-      setSections([]);
-      setModules([]);
-      await autoSaveDraft([], newType);
-      await refreshSourceLists(newType);
-      showToast(`Switched to ${newType === "full" ? "Full" : newType === "small" ? "Short" : "Proposal"} SoW`);
-    } catch (err) {
-      console.warn("Failed to save sow change:", err);
-      showToast("Error switching SoW types");
-    } finally { sowTypeChangeInProgressRef.current = false; }
-  };
+    }
+  } catch {
+    setDocumentSections([]);
+  }
+};
+
+const handleSowTypeChange = (newType: "full" | "small" | "proposal") => {
+  if (newType === sowSize) return;
+
+  const isProposalInvolved = newType === "proposal" || sowSize === "proposal";
+
+  if (isProposalInvolved) {
+    // ✅ No delete, no warning — just switch and load that type's existing data
+    sowTypeChangeInProgressRef.current = true;
+    skipDraftReloadRef.current = true;
+    setSowSize(newType);
+    setSections([]);
+    setModules([]);
+    loadDraftForSowType(newType).then(() => {
+      refreshSourceLists(newType);
+      showToast(`Switched to ${newType === "proposal" ? "Proposal" : newType === "full" ? "Full" : "Short"} SoW`);
+    }).finally(() => {
+      sowTypeChangeInProgressRef.current = false;
+    });
+    return;
+  }
+
+  // full ↔ small only: show warning, delete on confirm
+  setPendingSowType(newType);
+  setShowSowTypeWarning(true);
+};
+
+const confirmSowTypeChange = async () => {
+  if (!pendingSowType) return;
+  const newType = pendingSowType;
+  const oldSowType = sowSize.toUpperCase();
+  try {
+    const deleteRes = await apiFetch(`/drafts/delete-all/${opeId}/${oldSowType}`, { method: "DELETE" });
+    if (!deleteRes.success) { showToast("Failed to clear previous SoW data"); return; }
+    sowTypeChangeInProgressRef.current = true;
+    skipDraftReloadRef.current = true;
+    setShowSowTypeWarning(false);
+    setPendingSowType(null);
+    // ✅ Persist before setSowSize so reload lands on correct type
+    if (opeId && typeof window !== "undefined") {
+      localStorage.setItem(`sowSize_${opeId}`, newType);
+    }
+    setSowSize(newType);
+    setDocumentSections([]);
+    setSections([]);
+    setModules([]);
+    await autoSaveDraft([], newType);
+    await refreshSourceLists(newType);
+    showToast(`Switched to ${newType === "full" ? "Full" : newType === "small" ? "Short" : "Proposal"} SoW`);
+  } catch (err) {
+    console.warn("Failed to save sow change:", err);
+    showToast("Error switching SoW types");
+  } finally { sowTypeChangeInProgressRef.current = false; }
+};
 
   // ─── CRUD Actions ───────────────────────────────────────────────────────────
 
@@ -308,25 +361,26 @@ export function useCreateDocumentDataActions(state: any) {
 
   // ─── Helper: Deep copy section with unique module instances ─────────────────
 
-  const ensureModuleInstanceUniqueness = (sections: any[]) => {
-    return sections.map((section: any) => ({
-      ...section,
-      modules: (section.modules || []).map((module: any, idx: number) => {
-        // Ensure each module has unique runtime ID
-        const instanceId = module.instanceId || `${module.id}_${section.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-        // Return complete new object (deep copy to break references)
-        return {
-          id: module.id,
-          name: module.name || "",
-          description: module.description || "",
-          sectionId: module.sectionId || section.id,
-          position: module.position ?? idx,
-          canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : false,
-          instanceId, // Always include instanceId
-        };
-      }),
-    }));
-  };
+const ensureModuleInstanceUniqueness = (sections: any[]) => {
+  return sections.map((section: any) => ({
+    ...section,
+    modules: (section.modules || []).map((module: any, idx: number) => {
+      // ✅ ONLY generate new instanceId if truly missing — never overwrite existing
+      const instanceId = (module.instanceId && module.instanceId !== "null")
+        ? module.instanceId
+        : `${module.id}_${section.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      return {
+        id: module.id,
+        name: module.name || "",
+        description: module.description || "",
+        sectionId: module.sectionId || section.id,
+        position: module.position ?? idx,
+        canEdit: typeof module.canEdit !== "undefined" ? module.canEdit : false,
+        instanceId,
+      };
+    }),
+  }));
+};
 
   // ─── Module Edit ────────────────────────────────────────────────────────────
 

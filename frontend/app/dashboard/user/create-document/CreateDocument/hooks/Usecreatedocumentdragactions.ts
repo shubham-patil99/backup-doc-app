@@ -83,7 +83,8 @@ export function useCreateDocumentDragActions(state: any, dataActions: any) {
   const onModuleDrop = async (
     e: React.DragEvent,
     targetSectionId: number,
-    targetIndex: number
+    targetIndex: number,
+    targetPosition: "before" | "after" | null = null
   ) => {
     e.preventDefault();
     try {
@@ -92,16 +93,22 @@ export function useCreateDocumentDragActions(state: any, dataActions: any) {
       const { sectionId: sourceSectionId, index: sourceIndex } = parsed.data;
       if (Number(sourceSectionId) !== Number(targetSectionId)) return;
 
+      const position = targetPosition || dragOver.position || "before";
       const updated = documentSections.map((section: any) => {
         if (section.id !== Number(sourceSectionId)) return section;
         const mods = [...(section.modules || [])];
-        const src = Number(sourceIndex), tgt = Number(targetIndex);
-        if (src === tgt || src === tgt - 1) return section;
+        const src = Number(sourceIndex);
+        const tgt = Number(targetIndex);
+        const insertAt = Math.max(
+          0,
+          Math.min(
+            mods.length,
+            tgt + (position === "after" ? 1 : 0) - (src < tgt ? 1 : 0)
+          )
+        );
+        if (insertAt === src) return section;
         const [moved] = mods.splice(src, 1);
         if (!moved) return section;
-        let insertAt = tgt;
-        if (src < tgt) insertAt = Math.max(0, tgt - 1);
-        if (insertAt > mods.length) insertAt = mods.length;
         mods.splice(insertAt, 0, moved);
         return { ...section, modules: mods.map((m: any, idx: number) => ({ ...m, position: idx })) };
       });

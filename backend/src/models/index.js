@@ -23,6 +23,10 @@ db.Role.hasMany(db.User, { foreignKey: 'role_id' });
 db.Draft.belongsTo(db.User, { foreignKey: "userId", as: "user" });
 db.User.hasMany(db.Draft, { foreignKey: "userId", as: "drafts" });
 
+// Draft modified by user
+db.Draft.belongsTo(db.User, { foreignKey: "modifiedBy", as: "modifier" });
+db.User.hasMany(db.Draft, { foreignKey: "modifiedBy", as: "modifiedDrafts" });
+
 // Final ↔ User
 db.Final = require('./final'); // Make sure Final is imported!
 db.Final.belongsTo(db.User, { foreignKey: "userId", as: "user" });

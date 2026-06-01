@@ -611,7 +611,7 @@ exports.generateDocument = async (req, res) => {
       hasQuoteId: !!(quoteId || draft.quoteId),
       quoteIdLine:
         quoteId || draft.quoteId
-          ? `Quote Id - ${quoteId || draft.quoteId}`
+          ? `Quote Id (s)- ${quoteId || draft.quoteId}`
           : "",
       hpeLegalEntity: sanitizeXmlChars(hpeLegalEntity || draft.hpeLegalEntity || ""),
       opeId: sanitizeXmlChars(opeId || draft.opeId || ""),

@@ -173,31 +173,56 @@ export function useCreateDocumentEffects(state: any, actions: any) {
     const loadDraftForOpe = async () => {
       state.setLoading(true);
       try {
-        const res = await apiFetch(`/drafts/${opeId}`);
+        const storedSowSize = typeof window !== "undefined"
+          ? localStorage.getItem(`sowSize_${opeId}`)
+          : null;
+        const validStoredSowSize =
+          storedSowSize === "full" || storedSowSize === "small" || storedSowSize === "proposal"
+            ? storedSowSize
+            : null;
+        const requestSowType = validStoredSowSize || sowSize;
+        const requestSowTypeParam =
+          requestSowType === "small"
+            ? "SMALL"
+            : requestSowType === "proposal"
+            ? "PROPOSAL"
+            : "FULL";
+
+        const res = await apiFetch(`/drafts/${opeId}?sowType=${requestSowTypeParam}`);
         const draft = res?.draft;
         let pending = null;
         try { pending = JSON.parse(localStorage.getItem("pendingDraft") || "null"); } catch {}
         const source = draft || (pending && pending.opeId === opeId ? pending : null);
 
         if (source?.content && Array.isArray(source.content.documentSections)) {
-          const mergedSections = source.content.documentSections.map((sec: any) => ({
-            id: sec.id,
-            title: sec.title || "",
-            description: sec.description || "",
-            position: sec.position,
-            modules: (sec.modules || []).map((m: any, idx: number) => {
-              const full = modules.find((x: any) => String(x.id) === String(m.id));
-              return {
-                id: m.id,
-                name: m.name ?? full?.name ?? "",
-                description: m.description ?? full?.description ?? "",
-                canEdit: typeof m.canEdit !== "undefined" ? m.canEdit : (typeof full?.canEdit !== "undefined" ? full.canEdit : false),
-                sectionId: sec.id,
-                position: typeof m.position !== "undefined" ? m.position : idx,
-                instanceId: m.instanceId || `${m.id}_${sec.id}_${Math.random().toString(36).substring(7)}`,
-              };
-            }),
-          }));
+ const mergedSections = source.content.documentSections
+  .map((sec: any) => ({
+    id: sec.id,
+    title: sec.title || "",
+    description: sec.description || "",
+    position: sec.position,
+    modules: (sec.modules || [])
+      // ✅ Sort modules by saved position before rendering
+      .sort((a: any, b: any) => (a.position ?? 999) - (b.position ?? 999))
+      .map((m: any, idx: number) => {
+        const full = modules.find((x: any) => String(x.id) === String(m.id));
+        return {
+          id: m.id,
+          name: m.name ?? full?.name ?? "",
+          description: m.description ?? full?.description ?? "",
+          canEdit: typeof m.canEdit !== "undefined" ? m.canEdit
+            : (typeof full?.canEdit !== "undefined" ? full.canEdit : false),
+          sectionId: sec.id,
+          position: typeof m.position !== "undefined" ? m.position : idx,
+          // ✅ Prefer saved instanceId, only generate if truly missing
+          instanceId: (m.instanceId && m.instanceId !== "null")
+            ? m.instanceId
+            : `${m.id}_${sec.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        };
+      }),
+  }))
+  // ✅ Sort sections by saved position too
+  .sort((a: any, b: any) => (a.position ?? 999) - (b.position ?? 999));
           setDocumentSections(mergedSections);
           if (source.customerName) setCustomerName(source.customerName);
 
@@ -216,9 +241,18 @@ export function useCreateDocumentEffects(state: any, actions: any) {
 
           if (source.quoteId) setQuoteId(source.quoteId);
           if (source.hpeLegalEntity) setHpeLegalEntity(source.hpeLegalEntity);
-          const loadedSowType =
-            source.sowType === "SMALL" ? "small" : source.sowType === "PROPOSAL" ? "proposal" : "full";
-          setSowSize(loadedSowType);
+        const loadedSowType =
+  source.sowType === "SMALL" ? "small" : source.sowType === "PROPOSAL" ? "proposal" : "full";
+
+// ✅ Prefer localStorage over DB — localStorage reflects user's last manual selection
+const storedSowSize = typeof window !== "undefined"
+  ? localStorage.getItem(`sowSize_${opeId}`)
+  : null;
+const validStored = (storedSowSize === "full" || storedSowSize === "small" || storedSowSize === "proposal")
+  ? storedSowSize as SowSize
+  : null;
+
+setSowSize(validStored || loadedSowType);
           if (source.documentName) setDocumentName(source.documentName);
           else if (source.fileName) setDocumentName(deriveBaseName(source.fileName));
         }
@@ -235,12 +269,18 @@ export function useCreateDocumentEffects(state: any, actions: any) {
         }
 
         initialDraftLoadedRef.current = true;
-        const fetchSowType =
-          source?.sowType === "SMALL" ? "small" : source?.sowType === "PROPOSAL" ? "proposal" : "full";
-        if (!dataFetchedAfterLoadRef.current) {
-          dataFetchedAfterLoadRef.current = true;
-          setTimeout(() => fetchData(fetchSowType), 0);
-        }
+   const storedSowSizeForFetch = typeof window !== "undefined"
+      ? localStorage.getItem(`sowSize_${opeId}`)
+      : null;
+    const resolvedFetchSowType =
+      (storedSowSizeForFetch === "full" || storedSowSizeForFetch === "small" || storedSowSizeForFetch === "proposal")
+        ? storedSowSizeForFetch
+        : (source?.sowType === "SMALL" ? "small" : source?.sowType === "PROPOSAL" ? "proposal" : "full");
+
+    if (!dataFetchedAfterLoadRef.current) {
+      dataFetchedAfterLoadRef.current = true;
+      setTimeout(() => fetchData(resolvedFetchSowType), 0);
+    }
       } catch (err) { console.warn("Failed to load draft:", opeId, err); }
       finally { state.setLoading(false); }
     };

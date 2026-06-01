@@ -32,6 +32,11 @@ const Draft = sequelize.define("Draft", {
     allowNull: true,
     field: "partner_name",
   },
+  modifiedBy: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    field: "modified_by",
+  },
   customerAddress: {
     type: DataTypes.JSONB,
     allowNull: true,
