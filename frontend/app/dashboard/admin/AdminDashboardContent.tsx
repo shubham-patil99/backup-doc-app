@@ -47,14 +47,19 @@ export default function AdminDashboardContent() {
     }
   }, []);
 
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5431/api";
+
   // Fetch logo from backend
   useEffect(() => {
     const fetchLogo = async () => {
       try {
         // Add cache-busting parameter to always get fresh logo
-        const response = await fetch(`/api/settings/logo/file?t=${Date.now()}`, {
-          credentials: "include",
-        });
+        const response = await fetch(
+          `${API_BASE}/settings/logo/file?t=${Date.now()}`,
+          {
+            credentials: "include",
+          }
+        );
         if (response.ok) {
           const blob = await response.blob();
           const logoBlob = URL.createObjectURL(blob);

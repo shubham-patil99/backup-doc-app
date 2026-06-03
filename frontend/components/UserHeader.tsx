@@ -5,6 +5,8 @@ import { User } from "lucide-react";
 import logo from "@/assets/hpe-logo.png";
 import { color } from "jodit/esm/plugins/color/color";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5431/api";
+
 export default function UserHeader({ username }) {
   const [hydrated, setHydrated] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
@@ -19,9 +21,12 @@ export default function UserHeader({ username }) {
     const fetchLogo = async () => {
       try {
         // Add cache-busting parameter to always get fresh logo
-        const response = await fetch(`/api/settings/logo/file?t=${Date.now()}`, {
-          credentials: "include",
-        });
+        const response = await fetch(
+          `${API_BASE}/settings/logo/file?t=${Date.now()}`,
+          {
+            credentials: "include",
+          }
+        );
         if (response.ok) {
           const blob = await response.blob();
           const logoBlob = URL.createObjectURL(blob);
