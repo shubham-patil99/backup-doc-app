@@ -130,7 +130,7 @@ exports.generateProposal = async (req, res) => {
       ? `Prepared for ${partnerName} on behalf of ${customerName}`
       : `Prepared for ${customerName || "Benefit Company"}`;
 
-    const quoteIdLine = quoteId ? `Quote ID (s) — ${quoteId}` : "";
+    const quoteIdLine = quoteId ? `Quote ID (s) - ${quoteId}` : "";
 
     // ── Build slides array ───────────────────────────────────────────────────
     const slides = [];

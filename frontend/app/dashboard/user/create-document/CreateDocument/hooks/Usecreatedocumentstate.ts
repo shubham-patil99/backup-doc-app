@@ -20,7 +20,7 @@ export function useCreateDocumentState() {
   const [partnerName, setPartnerName] = useState("");
   const [opeId, setOpeId] = useState("");
   const [quoteId, setQuoteId] = useState<string | null>(null);
-  const [hpeLegalEntity, setHpeLegalEntity] = useState("");
+  const [hpeLegalEntity, setHpeLegalEntity] = useState("Hewlett Packard Enterprise");
   const [version, setVersion] = useState(0);
 
   // ── SoW type ─────────────────────────────────────────────────────────────────

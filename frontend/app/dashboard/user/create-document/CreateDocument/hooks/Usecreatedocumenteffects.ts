@@ -111,7 +111,7 @@ export function useCreateDocumentEffects(state: any, actions: any) {
       setNewOpeId(currentOpeId);
       setCustomerName(customerInfo?.customerName || "");
       setCustomerNo(customerInfo?.customerNo || "");
-      setHpeLegalEntity(customerInfo?.hpeLegalEntity || "");
+      setHpeLegalEntity(customerInfo?.hpeLegalEntity || "Hewlett Packard Enterprise");
       const partnerValue = customerInfo?.partnerName || customerInfo?.contractingParty || "";
       setContractingParty(partnerValue);
       setPartnerName(partnerValue);

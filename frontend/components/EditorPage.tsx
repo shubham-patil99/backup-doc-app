@@ -1,6 +1,6 @@
 // @ts-nocheck
 "use client";
-import React, { useRef, useMemo, useEffect } from "react";
+import React, { useRef, useMemo } from "react";
 import JoditEditor from "jodit-react";
 
 interface EditorPageProps {
@@ -9,7 +9,8 @@ interface EditorPageProps {
   placeholder?: string;
   baseApi?: string;
   expandUploads?: boolean;
-  minHeight?: number;
+  minHeight?: number | string;
+  config?: any;
 }
 
 const EditorPage: React.FC<EditorPageProps> = ({
@@ -19,9 +20,9 @@ const EditorPage: React.FC<EditorPageProps> = ({
   baseApi,
   expandUploads,
   minHeight = 400,
+  config: externalConfig,
 }) => {
   const editor = useRef<any>(null);
-  const lastClickPos = useRef<{ x: number; y: number } | null>(null);
 
   const normalizeInlineLists = (html: string) => {
     if (!html) return html;
@@ -50,258 +51,29 @@ const EditorPage: React.FC<EditorPageProps> = ({
   };
 
   const config = useMemo(() => {
-    let apiBase = (baseApi || process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
-    if (!apiBase && typeof window !== "undefined") apiBase = window.location.origin;
-    const serverRoot = apiBase.replace(/\/api$/, "");
-    const uploaderUrl = apiBase.endsWith("/api")
-      ? `${apiBase}/uploads/image`
-      : `${apiBase}/api/uploads/image`;
-
-    return {
+    const defaultConfig = {
       readonly: false,
-      toolbarSticky: false,
       placeholder,
-      zIndex: 999999,
-
-       readonly: false,
-      toolbarSticky: false,
-      placeholder: placeholder,
-
-      toolbarAdaptive: false,
-
-
-      buttons: [
-        "font",
-        "fontsize",
-        "ul",
-        "ol",
-        "table",
-        "link",
-        "image",
-        "align",
-      ],
-
-      removeButtons: [
-        "speechRecognize", "file", "video", "about", "fullsize",
-        "print", "selectall", "cut", "copy", "paste", "pasteText",
-        "pasteFromWord", "hr", "superscript", "subscript", "shadow",
-        "eraser", "symbol", "spellcheck", "toggleFormat", "preview",
-        "find", "replace",  "bold",
-        "italic",
-        "underline",
-        "strikethrough",
-        "outdent",
-        "source",
-          "brush",
-          "indent",
-          "undo",
-        "redo",
-      ],
-
-      allowTabNavigation: true,
-      enableTabToIndent: true,
-      controls: { list: { options: { allowNested: true } } },
-
-      enter: "P",
-      cleanHTML: { replaceNBSP: true, removeEmptyBlocks: true, fillEmptyParagraph: false },
-      textIcons: false,
-      iframe: false,
-      spellcheck: false,
-      safeMode: false,
-      allowFocus: true,
-      defaultLineHeight: 1.4,
-
-      uploader: {
-        insertImageAsBase64URI: false,
-        url: uploaderUrl,
-        format: "json",
-        method: "POST",
-        filesVariableName: () => "files",
-        isSuccess: (resp: any) =>
-          resp && (resp.success || resp.url || (resp.files && resp.files.length > 0)),
-        getMsg: (resp: any) => resp.message || resp.error || "Upload completed",
-        process: (resp: any) => {
-          let files: string[] = [];
-          if (resp.files && Array.isArray(resp.files))
-            files = resp.files.map((f: any) => (typeof f === "string" ? f : f.file || f.url));
-          else if (resp.url) files = [resp.url];
-          else if (resp.file) files = [resp.file];
-          return {
-            files,
-            path: "",
-            baseurl: serverRoot,
-            error: resp.error || null,
-            msg: resp.message || "",
-          };
-        },
-        defaultHandlerSuccess: function (data: any) {
-          const j = this;
-          if (data.files) data.files.forEach((url: string) => j.selection.insertImage(url, null, 250));
-        },
-        defaultHandlerError: function (resp: any) {
-          console.error("Upload error:", resp);
-          this.jodit.events.fire("errorMessage", resp.message || "Upload failed");
-        },
-      },
-
-      image: { editSrc: true, styles: { float: "none", maxWidth: "100%" } },
-
-      showXPathInStatusbar: false,
-      useSearch: false,
-      statusbar: false,
-      height: minHeight,
+      // Always use 100% so the editor fills its flex container
+      height: "100%",
+      buttons: ["bold", "italic", "underline", "ul", "ol", "link", "image"],
+      cleanHTML: { replaceNBSP: true },
       askBeforePasteHTML: false,
       askBeforePasteFromWord: false,
+      processPasteHTML: true,
       defaultActionOnPaste: "insert_clear_html",
-
-      events: {
-        afterInit: function (instance: any) {
-          const editorEl = instance.editor;
-
-          // Use toolbar element bounding rect as anchor (more stable than raw click coords)
-          let lastAnchorRect: DOMRect | null = null;
-          let lastAnchorTs = 0;
-
-          // Track mousedown on toolbar buttons and capture their bounding rect
-          const toolbarMouseDown = (e: MouseEvent) => {
-            try {
-              const target = e.target as HTMLElement;
-              const btn = target.closest(".jodit-toolbar-button, .jodit-toolbar button, .jodit-toolbar [role='button']") as HTMLElement;
-              if (btn) {
-                lastAnchorRect = btn.getBoundingClientRect();
-                lastAnchorTs = Date.now();
-                // small debug
-                // console.debug("Anchor rect captured", lastAnchorRect);
-              }
-            } catch (err) {}
-          };
-          document.addEventListener("mousedown", toolbarMouseDown, true);
-
-          // Position popup relative to an anchor rect (or fallback selection rect)
-          const repositionPopup = (popupEl: HTMLElement) => {
-            if (!popupEl) return;
-
-            // prevent double-processing for same popup element
-            if ((popupEl as any).__anchored) return;
-
-            // choose anchor: prefer recent toolbar anchor (within 1500ms), else selection bounding rect
-            let anchorRect: DOMRect | null = null;
-            if (lastAnchorRect && Date.now() - lastAnchorTs < 1500) {
-              anchorRect = lastAnchorRect;
-            } else {
-              try {
-                const selNode = instance.selection && instance.selection.current && instance.selection.current();
-                if (selNode && typeof selNode.getBoundingClientRect === "function") {
-                  anchorRect = selNode.getBoundingClientRect();
-                }
-              } catch (e) {}
-            }
-
-            // if no anchor, fallback to editor top-left
-            if (!anchorRect) {
-              const eRect = editorEl.getBoundingClientRect();
-              anchorRect = new DOMRect(eRect.left + 8, eRect.top + 8, 30, 20);
-            }
-
-            // wait a frame to let popup compute its size
-            requestAnimationFrame(() => {
-              try {
-                const popupRect = popupEl.getBoundingClientRect();
-                const viewportW = window.innerWidth;
-                const viewportH = window.innerHeight;
-                const gap = 8;
-
-                // prefer placing above anchor (so it doesn't overlap toolbar)
-                let left = anchorRect.left;
-                let top = anchorRect.top - popupRect.height - 6;
-
-                // if not enough space above, place below anchor
-                if (top < gap) top = anchorRect.bottom + 6;
-
-                // attempt center alignment relative to anchor
-                const centered = anchorRect.left + anchorRect.width / 2 - popupRect.width / 2;
-                if (centered >= gap && centered + popupRect.width <= viewportW - gap) {
-                  left = centered;
-                }
-
-                // clamp horizontally
-                if (left + popupRect.width > viewportW - gap) left = Math.max(gap, viewportW - popupRect.width - gap);
-                if (left < gap) left = gap;
-
-                // clamp vertically
-                if (top + popupRect.height > viewportH - gap) top = Math.max(gap, viewportH - popupRect.height - gap);
-                if (top < gap) top = gap;
-
-                popupEl.style.position = "fixed";
-                popupEl.style.left = `${Math.round(left)}px`;
-                popupEl.style.top = `${Math.round(top)}px`;
-                popupEl.style.transform = "none";
-                popupEl.style.zIndex = "999999";
-
-                // mark as positioned from anchor so we don't reuse stale anchor for nested/popups
-                (popupEl as any).__anchored = true;
-                // clear old anchor after using it
-                lastAnchorRect = null;
-              } catch (err) {
-                // ignore
-              }
-            });
-          };
-
-          // Observe body for new Jodit popups and position them
-          const observer = new MutationObserver((mutations) => {
-            for (const m of mutations) {
-              for (const n of Array.from(m.addedNodes || [])) {
-                if (n instanceof HTMLElement && n.classList.contains("jodit-popup")) {
-                  // small delay for popup content/layout
-                  setTimeout(() => repositionPopup(n), 6);
-
-                  // if popup changes (nested menus), try to re-position once more
-                  const popupObserver = new MutationObserver(() => repositionPopup(n));
-                  popupObserver.observe(n, { childList: true, subtree: true, attributes: true });
-
-                  // cleanup observers when popup removed
-                  const removeObs = new MutationObserver((ms) => {
-                    for (const mm of ms) {
-                      for (const rem of Array.from(mm.removedNodes || [])) {
-                        if (rem === n) {
-                          popupObserver.disconnect();
-                          removeObs.disconnect();
-                        }
-                      }
-                    }
-                  });
-                  removeObs.observe(document.body, { childList: true });
-                }
-              }
-            }
-          });
-
-          observer.observe(document.body, { childList: true, subtree: true });
-
-           // Re-position on resize/scroll
-           const handleRepositionAll = () => {
-             document.querySelectorAll(".jodit-popup").forEach((popup) => {
-               if (popup instanceof HTMLElement) repositionPopup(popup);
-             });
-           };
-
-           window.addEventListener("resize", handleRepositionAll);
-           window.addEventListener("scroll", handleRepositionAll, true);
-
-           // Cleanup on destroy
-           instance.events.on("beforeDestruct", () => {
-             observer.disconnect();
-             document.removeEventListener("mousedown", toolbarMouseDown, true);
-             window.removeEventListener("resize", handleRepositionAll);
-             window.removeEventListener("scroll", handleRepositionAll, true);
-           });
-         },
-       },
-
       style: { font: "14px Arial, sans-serif" },
     };
-  }, [baseApi, placeholder, minHeight]);
+
+    return {
+      ...defaultConfig,
+      // externalConfig can override anything except height/placeholder
+      ...externalConfig,
+      // Re-enforce these after spread so external config can't accidentally break layout
+      height: "100%",
+      placeholder,
+    } as any;
+  }, [placeholder, externalConfig]);
 
   const handleBlur = (newContent: string) => {
     const normalized = normalizeInlineLists(newContent);
@@ -310,7 +82,24 @@ const EditorPage: React.FC<EditorPageProps> = ({
 
   return (
     <>
-      <div className="jodit-editor-wrapper" style={{ position: "relative", overflow: "visible", height: "100%", width: "100%", minHeight: `${minHeight}px` }}>
+      {/*
+        Key changes:
+        - height: "100%" + flex: 1 so this div stretches inside its flex parent
+        - display: "flex" + flexDirection: "column" so JoditEditor can also stretch
+        - Removed minHeight / conditional height logic — parent controls size now
+      */}
+      <div
+        className="jodit-editor-wrapper"
+        style={{
+          position: "relative",
+          overflow: "visible",
+          height: "100%",
+          width: "100%",
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <JoditEditor
           ref={editor}
           value={value}
@@ -320,28 +109,57 @@ const EditorPage: React.FC<EditorPageProps> = ({
         />
       </div>
 
-      {/* ✅ Global styles for popup positioning */}
       <style jsx global>{`
+        /* ── Popup positioning ───────────────────────────── */
         .jodit-popup {
           position: fixed !important;
           z-index: 999999 !important;
         }
-
         .jodit-popup__content {
           max-height: 400px;
           overflow-y: auto;
         }
-
-        /* Ensure nested dropdowns appear */
         .jodit-toolbar-collection__popup {
           position: fixed !important;
           z-index: 999999 !important;
         }
-
-        /* Make sure popups are visible */
         body > .jodit-popup {
           display: block !important;
           visibility: visible !important;
+        }
+
+        /* ── Full-height chain ───────────────────────────── */
+        /*
+          Every node in the chain must be a flex column so that
+          "height: 100%" actually propagates all the way down to
+          the contenteditable area.
+        */
+        .jodit-editor-wrapper,
+        .jodit-editor-wrapper > div {
+          height: 100% !important;
+          flex: 1 !important;
+          display: flex !important;
+          flex-direction: column !important;
+        }
+
+        .jodit-container {
+          height: 100% !important;
+          display: flex !important;
+          flex-direction: column !important;
+        }
+
+        .jodit-workplace {
+          flex: 1 !important;
+          min-height: 0 !important; /* critical — lets the flex child shrink */
+          display: flex !important;
+          flex-direction: column !important;
+        }
+
+        .jodit-wysiwyg {
+          flex: 1 !important;
+          height: auto !important;
+          min-height: 0 !important;
+          overflow-y: auto !important;
         }
       `}</style>
     </>

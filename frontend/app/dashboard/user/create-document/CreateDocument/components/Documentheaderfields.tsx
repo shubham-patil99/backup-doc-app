@@ -147,12 +147,14 @@ export default function DocumentHeaderFields({
 
   {/* HPE Legal Entity — moved here from Row 3 */}
   <div>
-    <label className="block text-sm font-semibold text-gray-700 mb-2">HPE Legal Entity</label>
+    <label className="block text-sm font-semibold text-gray-700 mb-2">
+      HPE Legal Entity
+    </label>
     <div className="flex items-center gap-2">
       <input
         type="text"
         value={hpeLegalEntity}
-        placeholder="Enter HPE Legal Entity"
+        placeholder="Hewlett Packard Enterprise"
         onChange={(e) => setHpeLegalEntity(e.target.value)}
         onFocus={() => setHpeLegalEntityFocused(true)}
         onBlur={() => !isSavingHpeLegalEntity && setHpeLegalEntityFocused(false)}
@@ -200,7 +202,7 @@ export default function DocumentHeaderFields({
 
         {/* Quote ID */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Quote ID</label>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Quote ID (s)</label>
           <div className="flex items-center gap-2">
             <input
               type="text"
