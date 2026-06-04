@@ -30,9 +30,13 @@ export default function AdminDashboardContent() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [initials, setInitials] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
+  const [appName, setAppName] = useState("Brahma");
 
   // Extract user initials from localStorage
   useEffect(() => {
+    const storedAppName = localStorage.getItem("appName");
+    if (storedAppName) setAppName(storedAppName);
+
     const storedUser = localStorage.getItem("user");
     if (storedUser) {
       const user = JSON.parse(storedUser);
@@ -82,6 +86,14 @@ export default function AdminDashboardContent() {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
+  useEffect(() => {
+  const handleStorageChange = (e: StorageEvent) => {
+    if (e.key === "appName" && e.newValue) setAppName(e.newValue);
+  };
+  window.addEventListener("storage", handleStorageChange);
+  return () => window.removeEventListener("storage", handleStorageChange);
+}, []);
+
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -106,7 +118,7 @@ export default function AdminDashboardContent() {
          <div className="flex items-center gap-2">
             {logoUrl && <Image src={logoUrl} alt="HPE Logo" width="80px" height="80px" />}
             <Text size="small" color="#fff" className="text-center sm:text-left text-sm font-bold sm:text-base">
-              Brahma
+              {appName}
             </Text>
           </div>
 

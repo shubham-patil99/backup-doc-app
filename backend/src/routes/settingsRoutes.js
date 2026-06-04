@@ -93,6 +93,45 @@ router.post("/logo", upload.single("logo"), async (req, res) => {
   }
 });
 
+// ── Path to settings config ──────────────────────────────────────────────────
+const SETTINGS_FILE = path.join(__dirname, "../assets/settings.json");
+
+const readSettings = () => {
+  if (!fs.existsSync(SETTINGS_FILE)) return { appName: "Brahma" };
+  return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+};
+
+const writeSettings = (data) => {
+  const assetsDir = path.join(__dirname, "../assets");
+  if (!fs.existsSync(assetsDir)) fs.mkdirSync(assetsDir, { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
+};
+
+// ── GET: Retrieve app name ───────────────────────────────────────────────────
+router.get("/app-name", (req, res) => {
+  try {
+    const settings = readSettings();
+    res.json({ name: settings.appName || "Brahma" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST: Update app name ────────────────────────────────────────────────────
+router.post("/app-name", (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: "Name required" });
+    const settings = readSettings();
+    settings.appName = name.trim();
+    writeSettings(settings);
+    console.log("[settingsController] App name updated:", settings.appName);
+    res.json({ success: true, name: settings.appName });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET: List available templates ────────────────────────────────────────────
 router.get("/templates", async (req, res) => {
   try {

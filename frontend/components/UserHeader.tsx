@@ -11,9 +11,21 @@ export default function UserHeader({ username }) {
   const [hydrated, setHydrated] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
   const [logoUrl, setLogoUrl] = useState("");
+  const [appName, setAppName] = useState("Brahma");
 
   useEffect(() => {
     setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    const storedAppName = localStorage.getItem("appName");
+    if (storedAppName) setAppName(storedAppName);
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "appName" && e.newValue) setAppName(e.newValue);
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   // Fetch logo from backend
@@ -50,8 +62,12 @@ export default function UserHeader({ username }) {
   }, []);
 
   const handleLogout = () => {
-  // Clear all localStorage/sessionStorage
+  // Preserve the app name across logout, but clear session data.
+  const preservedAppName = localStorage.getItem("appName");
   localStorage.clear();
+  if (preservedAppName) {
+    localStorage.setItem("appName", preservedAppName);
+  }
   sessionStorage.clear();
   // Optionally, call your backend logout API here
   // Redirect to login page
@@ -68,7 +84,7 @@ export default function UserHeader({ username }) {
           ) : (
             <img src={logo.src} alt="HPE Logo" width={70} height={70} />
           )}
-          <span className="text-xl font-bold text-white">Brahma</span>
+          <span className="text-xl font-bold text-white">{appName}</span>
         </div>
 
         {/* Right Section */}

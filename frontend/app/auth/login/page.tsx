@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/apiClient";
@@ -12,6 +12,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [appName, setAppName] = useState("Brahma");
+
+  useEffect(() => {
+    const storedAppName = typeof window !== "undefined" ? localStorage.getItem("appName") : null;
+    if (storedAppName) setAppName(storedAppName);
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "appName" && e.newValue) setAppName(e.newValue);
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
 
   const router = useRouter();
   const { setUser } = useAuth();
@@ -71,7 +83,7 @@ return (
             <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl shadow-lg mb-4">
               <LogIn size={36} className="text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-white mb-2">Welcome to Brahma</h1>
+            <h1 className="text-3xl font-bold text-white mb-2">Welcome to {appName}</h1>
             <p className="text-green-100">Sign in to continue to your workspace</p>
           </div>
         </div>

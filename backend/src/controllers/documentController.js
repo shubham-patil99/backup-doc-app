@@ -591,9 +591,8 @@ exports.generateDocument = async (req, res) => {
       ? `Statement of Work to ${partnerName} for ${customerName}`
       : `Statement of Work for ${customerName}`;
 
-    const hpeLegalEntityBase = (hpeLegalEntity || draft.hpeLegalEntity || "Hewlett Packard Enterprise").trim();
-    const hpeLegalEntityNormalized = hpeLegalEntityBase.replace(/\s*Company\s*$/i, "").trim() || "Hewlett Packard Enterprise";
-    const hpeLegalEntityCompany = `${hpeLegalEntityNormalized} Company`;
+    const hpeLegalEntityValue = (hpeLegalEntity || draft.hpeLegalEntity || "Hewlett Packard Enterprise Company").trim();
+    const hpeLegalEntityCompany = hpeLegalEntityValue;
 
     const docTitle = partnerName
       ? `Statement of Work to ${partnerName} from ${hpeLegalEntityCompany} for ${customerName} for the in-scope Nonstop Services`
@@ -617,7 +616,7 @@ exports.generateDocument = async (req, res) => {
         quoteId || draft.quoteId
           ? `Quote Id (s) - ${quoteId || draft.quoteId}`
           : "",
-      hpeLegalEntity: sanitizeXmlChars(hpeLegalEntityNormalized),
+      hpeLegalEntity: sanitizeXmlChars(hpeLegalEntityCompany),
       opeId: sanitizeXmlChars(opeId || draft.opeId || ""),
       documentTitle: sanitizeXmlChars(
         documentTitle ||

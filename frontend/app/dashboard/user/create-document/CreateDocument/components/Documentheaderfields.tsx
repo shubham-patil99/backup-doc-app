@@ -154,7 +154,7 @@ export default function DocumentHeaderFields({
       <input
         type="text"
         value={hpeLegalEntity}
-        placeholder="Hewlett Packard Enterprise"
+        placeholder="Hewlett Packard Enterprise Company"
         onChange={(e) => setHpeLegalEntity(e.target.value)}
         onFocus={() => setHpeLegalEntityFocused(true)}
         onBlur={() => !isSavingHpeLegalEntity && setHpeLegalEntityFocused(false)}
