@@ -192,7 +192,7 @@ export default function AdminDashboardContent() {
                 }}
               >
                 <Text size="12px" color="#1f2937" weight="bold">
-                  brahma_2026.04_IT4
+                  brahma_2026.06_IT2
                 </Text>
               </Box>
             </Box>

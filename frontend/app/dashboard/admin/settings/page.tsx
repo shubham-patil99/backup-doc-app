@@ -341,7 +341,7 @@ export default function SettingsPage() {
                 <p className="text-2xl font-bold text-gray-800 tracking-tight">
                   {appNameEditing ? appNameInput || <span className="text-gray-300 italic">Type a name…</span> : appName}
                 </p>
-                <p className="text-xs text-gray-400">Shown in header &amp; browser tab</p>
+                <p className="text-xs text-gray-400">Shown in header</p>
               </div>
 
               {/* Right: edit controls */}
