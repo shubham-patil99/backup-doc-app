@@ -341,6 +341,7 @@ exports.saveDocument = async (req, res) => {
       const prevCustomerAddress = !finalAddress ? lastFinal?.customerAddress : finalAddress;
       const prevEngagementResources = !engagementResources ? lastFinal?.engagementResources : engagementResources;
       const prevQuoteId = !quoteId ? lastFinal?.quoteId : quoteId;
+      const prevHpeLegalEntity = hpeLegalEntity !== undefined && hpeLegalEntity !== null ? hpeLegalEntity : lastFinal?.hpeLegalEntity;
 
       const final = await Final.create({
         opeId,
@@ -356,6 +357,7 @@ exports.saveDocument = async (req, res) => {
         version: latestVersion + 1,
         fileName,
         quoteId: prevQuoteId || null,
+        hpeLegalEntity: prevHpeLegalEntity ?? null,
       });
       const finalJson = final.toJSON();
       finalJson.customerNo = await getCustomerNoByName(finalJson.customerName);
@@ -456,7 +458,13 @@ exports.getDraftByOpeAndVersion = async (req, res) => {
 exports.getFinalByOpeAndVersion = async (req, res) => {
   try {
     const { opeId, version } = req.params;
-    const final = await Final.findOne({ where: { opeId, version } });
+    const final = await Final.findOne({
+      where: { opeId, version },
+      attributes: [
+        'id', 'opeId', 'userId', 'modifiedBy', 'customerName', 'customerEmail', 'partnerName',
+        'customerAddress', 'content', 'sowType', 'status', 'version', 'fileName', 'quoteId', 'hpeLegalEntity', 'createdAt', 'updatedAt'
+      ],
+    });
     if (!final) {
       return res.status(404).json({ success: false, error: "Final not found" });
     }
@@ -543,6 +551,7 @@ exports.getAllFinals = async (req, res) => {
         customerAddress: obj.customerAddress || "",
         engagementResources: obj.engagementResources || [],
         content: obj.content || {},
+        hpeLegalEntity: obj.hpeLegalEntity || "",
         sowType: obj.sowType || "FULL",
       };
     }));
@@ -607,9 +616,15 @@ exports.getFinalByOpe = async (req, res) => {
     const { opeId } = req.params;
     const { userId } = req.query;
     // ✅ Always fetch LATEST final version
+    const whereClause = { opeId, status: "final" };
+    if (userId) whereClause.userId = userId;
     const final = await Final.findOne({
-      where: { opeId, userId, status: "final" }, // also filter by status
+      where: whereClause,
       order: [["version", "DESC"]], // GET LATEST
+      attributes: [
+        'id', 'opeId', 'userId', 'modifiedBy', 'customerName', 'customerEmail', 'partnerName',
+        'customerAddress', 'content', 'sowType', 'status', 'version', 'fileName', 'quoteId', 'hpeLegalEntity', 'createdAt', 'updatedAt'
+      ],
     });
     if (!final) {
       return res.status(404).json({ success: false, error: "Final not found" });
